@@ -1,0 +1,22 @@
+{
+  "name": "api-gen-package",
+     "version": "1.0.1",
+     "description": "A package that generates TypeScript APIs and interfaces from Swagger YAML files.",
+     "main": "index.js",
+     "bin": {
+       "generate-api": "bin/generate-api.js"  
+     },
+     "scripts": {
+       "generate": "node bin/generate-api.js"
+     },
+     "dependencies": {
+       "axios": "^1.7.7",
+       "fs": "^0.0.1-security",
+       "js-yaml": "^4.1.0",
+       "swagger-parser": "^10.0.3"
+     },
+     "keywords": ["swagger", "typescript", "api-generator", "openapi"],
+     "author": "FN MALIC",
+     "license": "MIT"
+   }
+   
