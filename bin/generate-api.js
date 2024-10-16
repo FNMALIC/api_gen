@@ -35,7 +35,6 @@ async function generateAPI() {
         const { apiMethodsByModel, interfaces, methodsByModel } = generateAPIFunctions(paths, components);
         writeAPIFiles(apiMethodsByModel, interfaces, apiFolder, typesFolder);
         generateReactQueryHooks(methodsByModel, hooksFolder);
-        // generateCRUDDashboard(methodsByModel, components, outputDir);
         generateCRUDDashboard(methodsByModel, pagesFolder);
 
         console.log("API, TypeScript interfaces, and hooks generated successfully!");

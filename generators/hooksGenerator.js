@@ -9,100 +9,137 @@ function generateReactQueryHooks(methodsByModel, hooksFolder) {
         let imports = methods.map(method => `import { ${method} } from "../api/${modelName}";`).join('\n');
         
         let hookContent = `
-            "use client";
-            import React from "react";
-            import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-            import { toast } from "react-toastify";
-            import 'react-toastify/dist/ReactToastify.css';
-            ${imports}
+"use client";
+import React from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/components/ui/use-toast";
+${imports}
 
-            export const use${capitalizedModelName} = (params, enable = false, ${modelName}Id = null) => {
-                const queryClient = useQueryClient();
-                const [isSuccess, setIsSuccess] = React.useState(false);
-                const [errorMessage, setErrorMessage] = React.useState("");
+export const use${capitalizedModelName} = (enable = false, ${modelName}Id = null) => {
+    const queryClient = useQueryClient();
+    const [isSuccess, setIsSuccess] = React.useState(false);
+    const [errorMessage, setErrorMessage] = React.useState("");
+    const { toast } = useToast();
 
-                let hooks = {};
-
-                // Function to display success notification
-                const notifySuccess = (message) => toast.success(message);
-
-                // Function to display error notification
-                const notifyError = (message) => toast.error(message);
-        `;
+    // Queries and Mutations
+`;
 
         methods.forEach(method => {
             if (method.startsWith('list')) {
                 hookContent += `
-                hooks['list'] = useQuery({
-                    queryKey: ['${modelName}s'],
-                    queryFn: ${method},
-                    enabled: !enable,
-                    staleTime: 300000,
-                });
+    const { data: ${modelName}s, isLoading: allLoading, error: allFetchError, refetch } = useQuery({
+        queryKey: ['${modelName}s'],
+        queryFn: ${method},
+        staleTime: 300000,
+        enabled: !enable,
+    });
                 `;
             } else if (method.startsWith('retrieve')) {
                 hookContent += `
-                hooks['retrieve'] = useQuery({
-                    queryKey: ['view${capitalizedModelName}', ${modelName}Id],
-                    queryFn: () => ${method}(${modelName}Id),
-                    enabled: enable && ${modelName}Id !== null,
-                    staleTime: 300000,
-                });
+    const { data: one${capitalizedModelName}, isLoading: singleLoading, error: singleFetchError } = useQuery({
+        queryKey: ['view${capitalizedModelName}', ${modelName}Id],
+        queryFn: () => ${method}(${modelName}Id),
+        staleTime: 300000,
+        enabled: enable && ${modelName}Id !== null,
+    });
                 `;
             } else if (method.startsWith('create')) {
                 hookContent += `
-                hooks['create'] = useMutation({
-                    mutationFn: (data) => ${method}(data),
-                    onSuccess: (res) => {
-                        queryClient.invalidateQueries({ queryKey: ['${modelName}s'] });
-                        setIsSuccess(true);
-                        notifySuccess('${capitalizedModelName} created successfully!');
-                    },
-                    onError: (err) => {
-                        setErrorMessage(err.message);
-                        setIsSuccess(false);
-                        notifyError('Failed to create ${capitalizedModelName}: ' + err.message);
-                    },
-                });
+    const { mutate: add${capitalizedModelName}Mutation, isPending: isAdding${capitalizedModelName} } = useMutation({
+        mutationFn: (data) => ${method}(data),
+        onSuccess: () => {
+            queryClient.invalidateQueries(['${modelName}s']);
+            toast({
+                title: "${capitalizedModelName} created",
+                description: "Successfully created.",
+            });
+            setIsSuccess(true);
+        },
+        onError: (error) => {
+            setErrorMessage(error.message);
+            toast({
+                title: "Failed to create ${capitalizedModelName}",
+                description: error.message,
+            });
+        },
+    });
                 `;
             } else if (method.startsWith('update')) {
                 hookContent += `
-                hooks['update'] = useMutation({
-                    mutationFn: (data) => ${method}(${modelName}Id, data),
-                    onSuccess: (res) => {
-                        queryClient.invalidateQueries({ queryKey: ['${modelName}s'] });
-                        setIsSuccess(true);
-                        notifySuccess('${capitalizedModelName} updated successfully!');
-                    },
-                    onError: (err) => {
-                        setErrorMessage(err.message);
-                        setIsSuccess(false);
-                        notifyError('Failed to update ${capitalizedModelName}: ' + err.message);
-                    },
-                });
+    const { mutate: update${capitalizedModelName}Mutation, isPending: isUpdating${capitalizedModelName} } = useMutation({
+        mutationFn: (data) => ${method}(${modelName}Id, data),
+        onSuccess: () => {
+            queryClient.invalidateQueries(['${modelName}s']);
+            toast({
+                title: "${capitalizedModelName} updated",
+                description: "Successfully updated.",
+            });
+            setIsSuccess(true);
+        },
+        onError: (error) => {
+            setErrorMessage(error.message);
+            toast({
+                title: "Failed to update ${capitalizedModelName}",
+                description: error.message,
+            });
+        },
+    });
                 `;
             } else if (method.startsWith('delete')) {
                 hookContent += `
-                hooks['delete'] = useMutation({
-                    mutationFn: (id) => ${method}(id),
-                    onSuccess: (res) => {
-                        queryClient.invalidateQueries({ queryKey: ['${modelName}s'] });
-                        setIsSuccess(true);
-                        notifySuccess('${capitalizedModelName} deleted successfully!');
-                    },
-                    onError: (err) => {
-                        setErrorMessage(err.message);
-                        setIsSuccess(false);
-                        notifyError('Failed to delete ${capitalizedModelName}: ' + err.message);
-                    },
-                });
+    const { mutate: delete${capitalizedModelName}Mutation, isPending: isDeleting${capitalizedModelName} } = useMutation({
+        mutationFn: (id) => ${method}(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries(['${modelName}s']);
+            toast({
+                title: "${capitalizedModelName} deleted",
+                description: "Successfully deleted.",
+            });
+            setIsSuccess(true);
+        },
+        onError: (error) => {
+            setErrorMessage(error.message);
+            toast({
+                title: "Failed to delete ${capitalizedModelName}",
+                description: error.message,
+            });
+        },
+    });
                 `;
             }
         });
 
         hookContent += `
-            return { ...hooks, isSuccess, errorMessage };
-        };
+    // Functions to call the mutations
+    const add${capitalizedModelName} = async (new${capitalizedModelName}) => {
+        await add${capitalizedModelName}Mutation(new${capitalizedModelName});
+    };
+
+    const update${capitalizedModelName} = async (edit${capitalizedModelName}) => {
+        await update${capitalizedModelName}Mutation(edit${capitalizedModelName});
+    };
+
+    const delete${capitalizedModelName} = async (id) => {
+        await delete${capitalizedModelName}Mutation(id);
+    };
+
+    return {
+        ${modelName}s,
+        allLoading,
+        allFetchError,
+        one${capitalizedModelName},
+        singleLoading,
+        singleFetchError,
+        add${capitalizedModelName},
+        isAdding${capitalizedModelName},
+        update${capitalizedModelName},
+        isUpdating${capitalizedModelName},
+        delete${capitalizedModelName},
+        isDeleting${capitalizedModelName},
+        isSuccess,
+        errorMessage,
+    };
+};
         `;
 
         fs.writeFileSync(`${hooksFolder}/use${capitalizedModelName}.ts`, hookContent);

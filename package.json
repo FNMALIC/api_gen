@@ -1,6 +1,6 @@
 {
   "name": "api-gen-package",
-     "version": "1.0.1",
+     "version": "1.0.11",
      "description": "A package that generates TypeScript APIs and interfaces from Swagger YAML files.",
      "main": "index.js",
      "bin": {

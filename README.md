@@ -24,3 +24,4 @@ how to use it
 ```bash
 api-gen [schema.yaml] [output-directory]
 ```
+
