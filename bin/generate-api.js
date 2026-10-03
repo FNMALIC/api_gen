@@ -6,7 +6,7 @@ const path = require('path');
 const { ensureDirSync, capitalizeFirstLetter, mapTypeToTS } = require('../utils/helpers');
 const { generateAxiosInstanceFile, generateAPIFunctions, writeAPIFiles } = require('../generators/apiGenerator');
 const { generateReactQueryHooks } = require('../generators/hooksGenerator');
-const { generateCRUDDashboard } = require('../generators/dashboardGenerator');
+const { generateCRUDDashboard, SHADCN_COMPONENTS } = require('../generators/dashboardGenerator');
 
 const inputFilePath = process.argv[2] || './schema.yaml'; 
 const outputDir = process.argv[3] || './src'; 
@@ -32,12 +32,14 @@ async function generateAPI() {
         ensureDirSync(pagesFolder);
 
         generateAxiosInstanceFile(utilsFolder);
-        const { apiMethodsByModel, interfaces, methodsByModel } = generateAPIFunctions(paths, components);
+        const { apiMethodsByModel, interfaces, methodsByModel, fieldsByModel } = generateAPIFunctions(paths, components);
         writeAPIFiles(apiMethodsByModel, interfaces, apiFolder, typesFolder);
         generateReactQueryHooks(methodsByModel, hooksFolder);
-        generateCRUDDashboard(methodsByModel, pagesFolder);
+        generateCRUDDashboard(methodsByModel, fieldsByModel, pagesFolder);
 
-        console.log("API, TypeScript interfaces, and hooks generated successfully!");
+        console.log("API, TypeScript interfaces, hooks, and shadcn/ui dashboard generated successfully!");
+        console.log("\nThe dashboard uses shadcn/ui. In your app, run:");
+        console.log(`  npx shadcn@latest add ${SHADCN_COMPONENTS.join(' ')}`);
     } catch (error) {
         console.error("Error generating files:", error);
     }

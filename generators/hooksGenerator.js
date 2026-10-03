@@ -5,21 +5,20 @@ function generateReactQueryHooks(methodsByModel, hooksFolder) {
     for (const [modelName, methods] of Object.entries(methodsByModel)) {
         const capitalizedModelName = capitalizeFirstLetter(modelName);
 
-        // Import necessary modules, including react-toastify
+        // Import necessary modules, including sonner (shadcn/ui toasts)
         let imports = methods.map(method => `import { ${method} } from "../api/${modelName}";`).join('\n');
         
         let hookContent = `
 "use client";
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useToast } from "@/components/ui/use-toast";
+import { toast } from "sonner";
 ${imports}
 
-export const use${capitalizedModelName} = (enable = false, ${modelName}Id = null) => {
+export const use${capitalizedModelName} = (enable = false, ${modelName}Id: string | number | null = null) => {
     const queryClient = useQueryClient();
     const [isSuccess, setIsSuccess] = React.useState(false);
     const [errorMessage, setErrorMessage] = React.useState("");
-    const { toast } = useToast();
 
     // Queries and Mutations
 `;
@@ -49,16 +48,14 @@ export const use${capitalizedModelName} = (enable = false, ${modelName}Id = null
         mutationFn: (data) => ${method}(data),
         onSuccess: () => {
             queryClient.invalidateQueries(['${modelName}s']);
-            toast({
-                title: "${capitalizedModelName} created",
+            toast.success("${capitalizedModelName} created", {
                 description: "Successfully created.",
             });
             setIsSuccess(true);
         },
         onError: (error) => {
             setErrorMessage(error.message);
-            toast({
-                title: "Failed to create ${capitalizedModelName}",
+            toast.error("Failed to create ${capitalizedModelName}", {
                 description: error.message,
             });
         },
@@ -70,16 +67,14 @@ export const use${capitalizedModelName} = (enable = false, ${modelName}Id = null
         mutationFn: (data) => ${method}(${modelName}Id, data),
         onSuccess: () => {
             queryClient.invalidateQueries(['${modelName}s']);
-            toast({
-                title: "${capitalizedModelName} updated",
+            toast.success("${capitalizedModelName} updated", {
                 description: "Successfully updated.",
             });
             setIsSuccess(true);
         },
         onError: (error) => {
             setErrorMessage(error.message);
-            toast({
-                title: "Failed to update ${capitalizedModelName}",
+            toast.error("Failed to update ${capitalizedModelName}", {
                 description: error.message,
             });
         },
@@ -91,16 +86,14 @@ export const use${capitalizedModelName} = (enable = false, ${modelName}Id = null
         mutationFn: (id) => ${method}(id),
         onSuccess: () => {
             queryClient.invalidateQueries(['${modelName}s']);
-            toast({
-                title: "${capitalizedModelName} deleted",
+            toast.success("${capitalizedModelName} deleted", {
                 description: "Successfully deleted.",
             });
             setIsSuccess(true);
         },
         onError: (error) => {
             setErrorMessage(error.message);
-            toast({
-                title: "Failed to delete ${capitalizedModelName}",
+            toast.error("Failed to delete ${capitalizedModelName}", {
                 description: error.message,
             });
         },
