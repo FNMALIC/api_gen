@@ -1,48 +1,63 @@
 #!/usr/bin/env node
-const fs = require('fs');
-const yaml = require('js-yaml');
-const swaggerParser = require('swagger-parser');
 const path = require('path');
-const { ensureDirSync, capitalizeFirstLetter, mapTypeToTS } = require('../utils/helpers');
-const { generateAxiosInstanceFile, generateAPIFunctions, writeAPIFiles } = require('../generators/apiGenerator');
-const { generateReactQueryHooks } = require('../generators/hooksGenerator');
-const { generateCRUDDashboard, SHADCN_COMPONENTS } = require('../generators/dashboardGenerator');
+const { Command, Option } = require('commander');
+const { generate, watch, TARGETS } = require('../lib/generate');
+const { SHADCN_COMPONENTS } = require('../generators/dashboardGenerator');
+const { version } = require('../package.json');
 
-const inputFilePath = process.argv[2] || './schema.yaml'; 
-const outputDir = process.argv[3] || './src'; 
+const program = new Command();
 
-async function generateAPI() {
-    try {
-        const fileContents = fs.readFileSync(inputFilePath, 'utf8');
-        const swaggerDoc = yaml.load(fileContents);
-        const parsedSchema = await swaggerParser.validate(swaggerDoc);
-        const paths = parsedSchema.paths;
-        const components = parsedSchema.components || {};
+program
+    .name('generate-api')
+    .description('Generate a TypeScript API client, React Query hooks and a shadcn/ui CRUD dashboard from an OpenAPI 3 document.')
+    .version(version)
+    .argument('[input]', 'OpenAPI document: local path or URL, YAML or JSON', './schema.yaml')
+    .argument('[output]', 'output directory', './src')
+    .option('-o, --output <dir>', 'output directory (same as the [output] argument)')
+    .option('--only <targets>', `comma-separated subset of ${TARGETS.join(', ')}`, value => value.split(',').map(t => t.trim()).filter(Boolean))
+    .addOption(new Option('--router <router>', 'routing library for the dashboard').choices(['react-router', 'next']).default('react-router'))
+    .option('--base-url <url>', 'axios baseURL used when utils/api.ts is first created', undefined)
+    .option('--prefix <path>', 'path prefix before the model name, e.g. /api/v1 (default: auto-detects /api and /v1 style segments)')
+    .addOption(new Option('--group-by <mode>', 'group operations into models by first path segment or by tag').choices(['path', 'tag']).default('path'))
+    .option('--no-format', 'skip Prettier formatting of the generated files')
+    .option('-w, --watch', 'regenerate whenever the input file changes')
+    .action(async (input, outputArg, opts) => {
+        const options = {
+            input,
+            output: opts.output || outputArg,
+            only: opts.only || TARGETS,
+            router: opts.router,
+            baseUrl: opts.baseUrl,
+            prefix: opts.prefix,
+            groupBy: opts.groupBy,
+            format: opts.format,
+        };
 
-        const apiFolder = `${outputDir}/api`;
-        const utilsFolder = `${outputDir}/utils`;
-        const typesFolder = `${outputDir}/types`;
-        const hooksFolder = `${outputDir}/hooks`;
-        const pagesFolder = `${outputDir}/pages`;
+        const report = ({ written, warnings }) => {
+            warnings.forEach(warning => console.warn(`warning: ${warning}`));
+            console.log(`Generated ${written.length} files in ${path.resolve(options.output)}`);
+        };
 
-        ensureDirSync(apiFolder);
-        ensureDirSync(utilsFolder);
-        ensureDirSync(typesFolder);
-        ensureDirSync(hooksFolder);
-        ensureDirSync(pagesFolder);
+        if (opts.watch) {
+            watch(options, {
+                onResult: result => {
+                    report(result);
+                    console.log('Watching for changes...');
+                },
+                onError: error => console.error(`error: ${error.message}`),
+            });
+            return;
+        }
 
-        generateAxiosInstanceFile(utilsFolder);
-        const { apiMethodsByModel, interfaces, methodsByModel, fieldsByModel } = generateAPIFunctions(paths, components);
-        writeAPIFiles(apiMethodsByModel, interfaces, apiFolder, typesFolder);
-        generateReactQueryHooks(methodsByModel, hooksFolder);
-        generateCRUDDashboard(methodsByModel, fieldsByModel, pagesFolder);
+        const result = await generate(options);
+        report(result);
+        if (options.only.includes('dashboard')) {
+            console.log('\nThe dashboard uses shadcn/ui. In your app, run:');
+            console.log(`  npx shadcn@latest add ${SHADCN_COMPONENTS.join(' ')}`);
+        }
+    });
 
-        console.log("API, TypeScript interfaces, hooks, and shadcn/ui dashboard generated successfully!");
-        console.log("\nThe dashboard uses shadcn/ui. In your app, run:");
-        console.log(`  npx shadcn@latest add ${SHADCN_COMPONENTS.join(' ')}`);
-    } catch (error) {
-        console.error("Error generating files:", error);
-    }
-}
-
-generateAPI();
+program.parseAsync(process.argv).catch(error => {
+    console.error(`error: ${error.message}`);
+    process.exitCode = 1;
+});

@@ -1,0 +1,183 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Shop", "version": "1.0.0" },
+  "paths": {
+    "/v1/products": {
+      "get": {
+        "tags": ["Products"],
+        "operationId": "listProducts",
+        "summary": "List products",
+        "parameters": [
+          { "$ref": "#/components/parameters/Page" },
+          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "Full-text search" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of products",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "total"],
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/Product" } },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Products"],
+        "operationId": "createProduct",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductInput" } } }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } }
+        }
+      }
+    },
+    "/v1/products/{productId}": {
+      "parameters": [{ "name": "productId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+      "get": {
+        "tags": ["Products"],
+        "operationId": "getProduct",
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+          "404": { "description": "Not found" }
+        }
+      },
+      "patch": {
+        "tags": ["Products"],
+        "operationId": "patchProduct",
+        "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductInput" } } } },
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } } }
+      },
+      "put": {
+        "tags": ["Products"],
+        "operationId": "replaceProduct",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductInput" } } } },
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } } }
+      },
+      "delete": {
+        "tags": ["Products"],
+        "operationId": "delete",
+        "deprecated": true,
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/v1/products/{productId}/image": {
+      "post": {
+        "tags": ["Products"],
+        "operationId": "upload-product-image",
+        "parameters": [{ "name": "productId", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": { "type": "object", "properties": { "file": { "type": "string", "format": "binary" } } } } }
+        },
+        "responses": { "204": { "description": "Uploaded" } }
+      }
+    },
+    "/v1/orders": {
+      "get": {
+        "tags": ["Orders"],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } } } } }
+        }
+      },
+      "post": {
+        "tags": ["Orders"],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderInput" } } }
+        },
+        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } } }
+      }
+    },
+    "/v1/orders/{orderId}/cancel": {
+      "post": {
+        "tags": ["Orders"],
+        "parameters": [{ "name": "orderId", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } } }
+      }
+    },
+    "/v1/product-categories": {
+      "get": {
+        "tags": ["Categories"],
+        "responses": {
+          "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/product.category" } } } } }
+        }
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "responses": { "200": { "description": "OK", "content": { "text/plain": { "schema": { "type": "string" } } } } }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "Page": { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 } }
+    },
+    "schemas": {
+      "ProductInput": {
+        "type": "object",
+        "required": ["name", "price", "status"],
+        "properties": {
+          "name": { "type": "string" },
+          "price": { "type": "number" },
+          "status": { "type": "string", "enum": ["draft", "published"] },
+          "description": { "type": "string", "nullable": true },
+          "website": { "type": "string", "format": "uri" },
+          "releaseDate": { "type": "string", "format": "date" },
+          "featured": { "type": "boolean" },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "Product": {
+        "description": "A product in the catalogue",
+        "allOf": [
+          { "$ref": "#/components/schemas/ProductInput" },
+          {
+            "type": "object",
+            "required": ["productId"],
+            "properties": {
+              "productId": { "type": "string", "readOnly": true },
+              "createdAt": { "type": "string", "format": "date-time", "readOnly": true }
+            }
+          }
+        ]
+      },
+      "OrderInput": {
+        "type": "object",
+        "required": ["productIds"],
+        "properties": {
+          "productIds": { "type": "array", "items": { "type": "string" } },
+          "note": { "type": "string" }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "integer" },
+          "status": { "type": "string", "enum": ["pending", "paid", "cancelled"] },
+          "total": { "type": "number", "nullable": true },
+          "note": { "type": "string" }
+        }
+      },
+      "product.category": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "label": { "type": "string" },
+          "parent": { "allOf": [{ "$ref": "#/components/schemas/product.category" }], "nullable": true }
+        }
+      }
+    }
+  }
+}

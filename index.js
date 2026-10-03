@@ -1,5 +1,9 @@
-// You can export helper functions here if needed
+const { generate, watch } = require('./lib/generate');
+const { loadSpec, buildModels } = require('./lib/spec');
+
 module.exports = {
-    generateAPI: require('./bin/generate-api'),
-  };
-  
+    generate,
+    watch,
+    loadSpec,
+    buildModels,
+};

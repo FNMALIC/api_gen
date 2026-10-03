@@ -1,144 +1,133 @@
-const fs = require('fs');
-const { capitalizeFirstLetter } = require('../utils/helpers');
+const { HEADER } = require('./apiGenerator');
 
-function generateReactQueryHooks(methodsByModel, hooksFolder) {
-    for (const [modelName, methods] of Object.entries(methodsByModel)) {
-        const capitalizedModelName = capitalizeFirstLetter(modelName);
+// Path ids arrive as strings from the router; convert them to what the API function expects
+function idArgument(op, variable) {
+    return op.pathParams[0].isNumber ? `Number(${variable})` : `String(${variable})`;
+}
 
-        // Import necessary modules, including sonner (shadcn/ui toasts)
-        let imports = methods.map(method => `import { ${method} } from "../api/${modelName}";`).join('\n');
-        
-        let hookContent = `
-"use client";
-import React from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-${imports}
+function generateHook(model) {
+    const { name, Name, listVar } = model;
+    const { list, retrieve, create, update, delete: remove } = model.crud;
+    const label = Name;
+    const idVar = `${name}Id`;
+    const queryKey = `${name}QueryKey`;
+    const hasMutations = !!(create || update || remove);
 
-export const use${capitalizedModelName} = (enable = false, ${modelName}Id: string | number | null = null) => {
-    const queryClient = useQueryClient();
-    const [isSuccess, setIsSuccess] = React.useState(false);
-    const [errorMessage, setErrorMessage] = React.useState("");
+    const parts = [];
+    const returned = [];
 
-    // Queries and Mutations
-`;
-
-        methods.forEach(method => {
-            if (method.startsWith('list')) {
-                hookContent += `
-    const { data: ${modelName}s, isLoading: allLoading, error: allFetchError, refetch } = useQuery({
-        queryKey: ['${modelName}s'],
-        queryFn: ${method},
+    if (list) {
+        parts.push(`
+    const { data: ${listVar}, isLoading: allLoading, error: allFetchError, refetch } = useQuery({
+        queryKey: ${queryKey},
+        queryFn: () => api.${list.functionName}(),
         staleTime: 300000,
         enabled: !enable,
-    });
-                `;
-            } else if (method.startsWith('retrieve')) {
-                hookContent += `
-    const { data: one${capitalizedModelName}, isLoading: singleLoading, error: singleFetchError } = useQuery({
-        queryKey: ['view${capitalizedModelName}', ${modelName}Id],
-        queryFn: () => ${method}(${modelName}Id),
+    });`);
+        returned.push(listVar, 'allLoading', 'allFetchError', 'refetch');
+    }
+
+    if (retrieve) {
+        parts.push(`
+    const { data: one${Name}, isLoading: singleLoading, error: singleFetchError } = useQuery({
+        queryKey: [...${queryKey}, ${idVar}],
+        queryFn: () => api.${retrieve.functionName}(${idArgument(retrieve, idVar)}),
         staleTime: 300000,
-        enabled: enable && ${modelName}Id !== null,
-    });
-                `;
-            } else if (method.startsWith('create')) {
-                hookContent += `
-    const { mutate: add${capitalizedModelName}Mutation, isPending: isAdding${capitalizedModelName} } = useMutation({
-        mutationFn: (data) => ${method}(data),
+        enabled: enable && ${idVar} !== null,
+    });`);
+        returned.push(`one${Name}`, 'singleLoading', 'singleFetchError');
+    }
+
+    const mutation = (op, { verb, past, mutationVar, pendingVar, wrapper, param, call }) => {
+        parts.push(`
+    const { mutate: ${mutationVar}, isPending: ${pendingVar} } = useMutation({
+        mutationFn: (${param}) => ${call},
         onSuccess: () => {
-            queryClient.invalidateQueries(['${modelName}s']);
-            toast.success("${capitalizedModelName} created", {
-                description: "Successfully created.",
-            });
+            queryClient.invalidateQueries({ queryKey: ${queryKey} });
+            toast.success("${label} ${past}", { description: "Successfully ${past}." });
             setIsSuccess(true);
         },
-        onError: (error) => {
-            setErrorMessage(error.message);
-            toast.error("Failed to create ${capitalizedModelName}", {
-                description: error.message,
-            });
-        },
+        onError: onError("${verb}"),
     });
-                `;
-            } else if (method.startsWith('update')) {
-                hookContent += `
-    const { mutate: update${capitalizedModelName}Mutation, isPending: isUpdating${capitalizedModelName} } = useMutation({
-        mutationFn: (data) => ${method}(${modelName}Id, data),
-        onSuccess: () => {
-            queryClient.invalidateQueries(['${modelName}s']);
-            toast.success("${capitalizedModelName} updated", {
-                description: "Successfully updated.",
-            });
-            setIsSuccess(true);
-        },
-        onError: (error) => {
-            setErrorMessage(error.message);
-            toast.error("Failed to update ${capitalizedModelName}", {
-                description: error.message,
-            });
-        },
-    });
-                `;
-            } else if (method.startsWith('delete')) {
-                hookContent += `
-    const { mutate: delete${capitalizedModelName}Mutation, isPending: isDeleting${capitalizedModelName} } = useMutation({
-        mutationFn: (id) => ${method}(id),
-        onSuccess: () => {
-            queryClient.invalidateQueries(['${modelName}s']);
-            toast.success("${capitalizedModelName} deleted", {
-                description: "Successfully deleted.",
-            });
-            setIsSuccess(true);
-        },
-        onError: (error) => {
-            setErrorMessage(error.message);
-            toast.error("Failed to delete ${capitalizedModelName}", {
-                description: error.message,
-            });
-        },
-    });
-                `;
-            }
+    const ${wrapper.name} = (${wrapper.param}) => ${mutationVar}(${wrapper.arg});`);
+        returned.push(wrapper.name, pendingVar);
+    };
+
+    if (create) {
+        mutation(create, {
+            verb: 'create',
+            past: 'created',
+            mutationVar: `add${Name}Mutation`,
+            pendingVar: `isAdding${Name}`,
+            param: `data: Parameters<typeof api.${create.functionName}>[0]`,
+            call: `api.${create.functionName}(data)`,
+            wrapper: { name: `add${Name}`, param: `data: Parameters<typeof api.${create.functionName}>[0]`, arg: 'data' },
         });
+    }
+    if (update) {
+        mutation(update, {
+            verb: 'update',
+            past: 'updated',
+            mutationVar: `update${Name}Mutation`,
+            pendingVar: `isUpdating${Name}`,
+            param: `data: Parameters<typeof api.${update.functionName}>[1]`,
+            call: `api.${update.functionName}(${idArgument(update, idVar)}, data)`,
+            wrapper: { name: `update${Name}`, param: `data: Parameters<typeof api.${update.functionName}>[1]`, arg: 'data' },
+        });
+    }
+    if (remove) {
+        mutation(remove, {
+            verb: 'delete',
+            past: 'deleted',
+            mutationVar: `delete${Name}Mutation`,
+            pendingVar: `isDeleting${Name}`,
+            param: 'id: string | number',
+            call: `api.${remove.functionName}(${idArgument(remove, 'id')})`,
+            wrapper: { name: `delete${Name}`, param: 'id: string | number', arg: 'id' },
+        });
+    }
 
-        hookContent += `
-    // Functions to call the mutations
-    const add${capitalizedModelName} = async (new${capitalizedModelName}) => {
-        await add${capitalizedModelName}Mutation(new${capitalizedModelName});
-    };
+    const hasQueries = !!(list || retrieve);
+    const reactImports = [hasQueries && 'useQuery', hasMutations && 'useMutation', hasMutations && 'useQueryClient'].filter(Boolean);
+    // Unused parameters are prefixed with "_" so strict tsconfigs (noUnusedParameters) accept them
+    const enableParam = hasQueries ? 'enable' : '_enable';
+    const idParam = retrieve || update ? idVar : `_${idVar}`;
 
-    const update${capitalizedModelName} = async (edit${capitalizedModelName}) => {
-        await update${capitalizedModelName}Mutation(edit${capitalizedModelName});
-    };
+    return `"use client";
+${HEADER}${hasMutations ? 'import { useState } from "react";\n' : ''}import { ${reactImports.join(', ')} } from "@tanstack/react-query";${hasMutations ? `
+import { toast } from "sonner";` : ''}
+import * as api from "../api/${name}";
 
-    const delete${capitalizedModelName} = async (id) => {
-        await delete${capitalizedModelName}Mutation(id);
-    };
+export const ${queryKey} = [${JSON.stringify(name)}] as const;
+
+export const use${Name} = (${enableParam} = false, ${idParam}: string | number | null = null) => {${hasMutations ? `
+    const queryClient = useQueryClient();
+    const [isSuccess, setIsSuccess] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
+
+    const onError = (action: string) => (error: Error) => {
+        setErrorMessage(error.message);
+        toast.error(\`Failed to \${action} ${label}\`, { description: error.message });
+    };` : ''}
+${parts.join('\n')}
 
     return {
-        ${modelName}s,
-        allLoading,
-        allFetchError,
-        one${capitalizedModelName},
-        singleLoading,
-        singleFetchError,
-        add${capitalizedModelName},
-        isAdding${capitalizedModelName},
-        update${capitalizedModelName},
-        isUpdating${capitalizedModelName},
-        delete${capitalizedModelName},
-        isDeleting${capitalizedModelName},
-        isSuccess,
-        errorMessage,
+        ${[...returned, ...(hasMutations ? ['isSuccess', 'errorMessage'] : [])].join(',\n        ')},
     };
 };
-        `;
+`;
+}
 
-        fs.writeFileSync(`${hooksFolder}/use${capitalizedModelName}.ts`, hookContent);
+// hooks/use<Model>.ts for every model with at least one CRUD operation
+function generateReactQueryHooks(models) {
+    const files = {};
+    for (const model of models) {
+        if (Object.keys(model.crud).length === 0) continue;
+        files[`hooks/use${model.Name}.ts`] = generateHook(model);
     }
+    return files;
 }
 
 module.exports = {
-    generateReactQueryHooks
+    generateReactQueryHooks,
 };

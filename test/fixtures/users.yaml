@@ -1,0 +1,60 @@
+openapi: 3.0.0
+info: {title: Users, version: "1.0"}
+paths:
+  /api/users:
+    get:
+      operationId: list
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/User'}}
+    post:
+      operationId: create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/User'}
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+  /api/users/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: integer}}
+    get:
+      operationId: retrieve
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+    put:
+      operationId: update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/User'}
+      responses: {"200": {description: ok}}
+    delete:
+      operationId: delete
+      responses: {"204": {description: deleted}}
+components:
+  schemas:
+    User:
+      type: object
+      required: [name, email]
+      properties:
+        id: {type: integer, readOnly: true}
+        name: {type: string, description: Full name}
+        email: {type: string, format: email}
+        age: {type: integer}
+        active: {type: boolean}
+        role: {type: string, enum: [admin, editor, viewer]}
+        tags: {type: array, items: {type: string}}
