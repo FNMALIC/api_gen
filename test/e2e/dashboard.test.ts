@@ -17,6 +17,7 @@ import path from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { chromium, type Browser, type Page, type Route } from 'playwright-core';
 import { generate } from '../../src/index.ts';
+import { binScript } from '../helpers.ts';
 import { SHADCN_COMPONENTS } from '../../src/generators/dashboard.ts';
 
 const ROOT = path.join(import.meta.dirname, '..', '..');
@@ -48,8 +49,14 @@ const FALLBACK_DEPENDENCIES = [
     'tailwind-merge',
 ];
 
-function run(command: string, args: string[]) {
-    execFileSync(command, args, { cwd: APP, stdio: 'inherit', env: { ...process.env, CI: '1' } });
+// npm and npx are .cmd shims on Windows, which only run through a shell
+function run(command: 'npm' | 'npx', args: string[]) {
+    execFileSync(command, args, { cwd: APP, stdio: 'inherit', env: { ...process.env, CI: '1' }, shell: process.platform === 'win32' });
+}
+
+// Run an app dependency's CLI (tsc, vite) with node, on any platform
+function appBin(packageName: string, binName: string, args: string[]) {
+    return [binScript(APP, packageName, binName), ...args];
 }
 
 function writeFile(relativePath: string, content: string) {
@@ -311,14 +318,14 @@ createRoot(document.getElementById("root")!).render(
     });
 
     it('type-checks against the real components with strict settings', () => {
-        execFileSync(path.join(APP, 'node_modules', '.bin', 'tsc'), ['-p', APP], { cwd: APP, stdio: 'inherit' });
+        execFileSync(process.execPath, appBin('typescript', 'tsc', ['-p', APP]), { cwd: APP, stdio: 'inherit' });
     });
 
     it('builds and serves', async () => {
-        execFileSync(path.join(APP, 'node_modules', '.bin', 'vite'), ['build', '--logLevel', 'warn'], { cwd: APP, stdio: 'inherit' });
+        execFileSync(process.execPath, appBin('vite', 'vite', ['build', '--logLevel', 'warn']), { cwd: APP, stdio: 'inherit' });
         const port = await freePort();
         baseUrl = `http://127.0.0.1:${port}`;
-        server = spawn(path.join(APP, 'node_modules', '.bin', 'vite'), ['preview', '--port', String(port), '--strictPort', '--host', '127.0.0.1'], {
+        server = spawn(process.execPath, appBin('vite', 'vite', ['preview', '--port', String(port), '--strictPort', '--host', '127.0.0.1']), {
             cwd: APP,
             stdio: 'ignore',
         });

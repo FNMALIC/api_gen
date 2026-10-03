@@ -7,10 +7,15 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         node-version: [22.x, 24.x]
+        include:
+          - os: windows-latest
+            node-version: 22.x
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,6 +27,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: CLI smoke test (built package)
+        shell: bash
         run: node bin/generate-api.js test/fixtures/users.yaml "$RUNNER_TEMP/out" && test -f "$RUNNER_TEMP/out/pages/routes.tsx"
 
   e2e:

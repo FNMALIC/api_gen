@@ -129,7 +129,8 @@ test('removes files a previous run generated that are no longer produced', async
     const dir = tmpDir('stale');
     const spec = path.join(dir, 'users.yaml');
     const output = path.join(dir, 'src');
-    fs.copyFileSync(path.join(FIXTURES, 'users.yaml'), spec);
+    // Normalized so the edits below also work on CRLF checkouts (Windows)
+    fs.writeFileSync(spec, fs.readFileSync(path.join(FIXTURES, 'users.yaml'), 'utf8').replace(/\r\n/g, '\n'));
     await generate({ input: spec, output });
     assert.ok(fs.existsSync(path.join(output, 'pages/users/EditUser.tsx')));
 
