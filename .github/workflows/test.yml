@@ -2,8 +2,8 @@ name: Test
 
 on:
   push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -18,4 +18,22 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
+      - run: npm run typecheck
       - run: npm test
+      - run: npm run build
+      - name: CLI smoke test (built package)
+        run: node bin/generate-api.js test/fixtures/users.yaml "$RUNNER_TEMP/out" && test -f "$RUNNER_TEMP/out/pages/routes.tsx"
+
+  e2e:
+    # Generates a dashboard into a real Vite app with the real shadcn/ui components and clicks through it
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run test:e2e

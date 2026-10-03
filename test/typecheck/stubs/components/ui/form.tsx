@@ -14,4 +14,5 @@ export const FormField = <
 export function FormItem(_props: ComponentProps<"div">) { return null; }
 export function FormLabel(_props: ComponentProps<"label">) { return null; }
 export function FormControl(_props: { children?: ReactNode }) { return null; }
+export function FormDescription(_props: ComponentProps<"p">) { return null; }
 export function FormMessage(_props: ComponentProps<"p">) { return null; }

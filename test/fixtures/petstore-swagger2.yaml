@@ -1,0 +1,37 @@
+swagger: "2.0"
+info: {title: Petstore, version: "1.0"}
+basePath: /api
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      produces: [application/json]
+      parameters:
+        - {name: limit, in: query, type: integer}
+      responses:
+        "200":
+          description: ok
+          schema: {type: array, items: {$ref: '#/definitions/Pet'}}
+    post:
+      operationId: createPet
+      consumes: [application/json]
+      parameters:
+        - {name: body, in: body, required: true, schema: {$ref: '#/definitions/Pet'}}
+      responses:
+        "201": {description: created, schema: {$ref: '#/definitions/Pet'}}
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      produces: [application/json]
+      parameters:
+        - {name: petId, in: path, required: true, type: integer}
+      responses:
+        "200": {description: ok, schema: {$ref: '#/definitions/Pet'}}
+definitions:
+  Pet:
+    type: object
+    required: [name]
+    properties:
+      id: {type: integer, readOnly: true}
+      name: {type: string}
+      species: {type: string, enum: [cat, dog, bird]}
