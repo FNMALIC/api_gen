@@ -36,6 +36,7 @@ const APP_DEPENDENCIES = [
     '@hookform/resolvers@5',
 ];
 const APP_DEV_DEPENDENCIES = ['vite@7', '@vitejs/plugin-react@5', 'typescript@5', '@types/react@19', '@types/react-dom@19', 'tailwindcss@4', '@tailwindcss/vite@4'];
+const SHADCN_BASE_DEPENDENCIES = ['class-variance-authority', 'clsx', 'tailwind-merge', 'lucide-react', 'tw-animate-css'];
 const FALLBACK_DEPENDENCIES = [
     '@radix-ui/react-slot',
     '@radix-ui/react-label',
@@ -135,6 +136,18 @@ function installApp() {
         run('npm', ['install', '--no-audit', '--no-fund', ...FALLBACK_DEPENDENCIES]);
         fs.cpSync(FALLBACK_UI, path.join(APP, 'src'), { recursive: true });
     } else {
+        // What `shadcn init` sets up: the base dependencies and the cn() helper the components import
+        run('npm', ['install', '--no-audit', '--no-fund', ...SHADCN_BASE_DEPENDENCIES]);
+        writeFile(
+            'src/lib/utils.ts',
+            `import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...inputs: ClassValue[]) {
+    return twMerge(clsx(inputs));
+}
+`
+        );
         run('npx', ['--yes', 'shadcn@latest', 'add', '--yes', '--overwrite', ...SHADCN_COMPONENTS]);
     }
 }
