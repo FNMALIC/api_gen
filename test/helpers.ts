@@ -10,6 +10,13 @@ export const FIXTURES = path.join(import.meta.dirname, 'fixtures');
 const TMP_ROOT = path.join(import.meta.dirname, '.tmp');
 const STUBS = path.join(import.meta.dirname, 'typecheck', 'stubs');
 
+/** Path of a package's bin script, to run with `node` on any platform */
+export function binScript(projectDir: string, packageName: string, binName: string): string {
+    const packageDir = path.join(projectDir, 'node_modules', packageName);
+    const { bin } = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8')) as { bin: string | Record<string, string> };
+    return path.join(packageDir, typeof bin === 'string' ? bin : bin[binName]);
+}
+
 export function tmpDir(name: string): string {
     fs.mkdirSync(TMP_ROOT, { recursive: true });
     return fs.mkdtempSync(path.join(TMP_ROOT, `${name}-`));
@@ -26,7 +33,8 @@ export async function generateFixture(fixture: string, options: Partial<Generate
 
 /** Type-check generated code with strict settings, using shadcn/ui and Next.js stubs */
 export function typecheck(dir: string): void {
-    const stubs = path.relative(dir, STUBS);
+    // tsconfig paths use forward slashes on every platform
+    const stubs = path.relative(dir, STUBS).split(path.sep).join('/');
     const tsconfig = {
         compilerOptions: {
             target: 'ES2022',
@@ -54,9 +62,10 @@ export function typecheck(dir: string): void {
     };
     fs.writeFileSync(path.join(dir, 'tsconfig.json'), JSON.stringify(tsconfig, null, 2));
     try {
-        execFileSync(path.join(ROOT, 'node_modules', '.bin', 'tsc'), ['-p', dir], { encoding: 'utf8', stdio: 'pipe' });
+        // Run TypeScript's bin script with node: node_modules/.bin/tsc is a .cmd shim on Windows
+        execFileSync(process.execPath, [binScript(ROOT, 'typescript', 'tsc'), '-p', dir], { encoding: 'utf8', stdio: 'pipe' });
     } catch (error) {
-        const { stdout, stderr } = error as { stdout: string; stderr: string };
-        assert.fail(`tsc failed:\n${stdout}${stderr}`);
+        const { stdout = '', stderr = '', message } = error as { stdout?: string; stderr?: string; message: string };
+        assert.fail(`tsc failed:\n${stdout}${stderr}` || message);
     }
 }

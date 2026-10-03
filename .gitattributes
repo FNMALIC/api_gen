@@ -1,0 +1,2 @@
+# Keep LF line endings on every platform (fixtures are edited by tests, generated code is compared)
+* text=auto eol=lf
