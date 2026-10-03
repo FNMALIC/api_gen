@@ -127,8 +127,16 @@ export interface Operation {
     queryParams: Param[];
     headerParams: Param[];
     body: RequestBody | null;
+    /** The response body as the server sends it */
     responseSchema: SchemaObject | null;
     responseIsJson: boolean;
+    /**
+     * Set for wrapped responses such as { success, data }: the API function throws when success is false and returns
+     * body[key], or the whole body when key is null (lists keep their envelope so "meta" stays reachable)
+     */
+    envelope: { key: string | null } | null;
+    /** What the generated API function returns: the unwrapped record, or the response body */
+    returnSchema: SchemaObject | null;
     crud: CrudAction | null;
     functionName: string;
 }
@@ -158,7 +166,8 @@ export interface ListCapabilities {
     size: { name: string } | null;
     search: { name: string } | null;
     sort: { name: string; direction: { name: string; asc: string; desc: string } | null } | null;
-    totalKey: string | null;
+    /** Where the total count is in the list response, e.g. ["total"] or ["meta", "total"] */
+    totalPath: string[] | null;
 }
 
 export interface Model {

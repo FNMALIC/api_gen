@@ -78,7 +78,7 @@ interface ListModes {
     caps: ListCapabilities;
 }
 
-const NO_CAPABILITIES: ListCapabilities = { serverPaging: false, page: null, offset: null, size: null, search: null, sort: null, totalKey: null };
+const NO_CAPABILITIES: ListCapabilities = { serverPaging: false, page: null, offset: null, size: null, search: null, sort: null, totalPath: null };
 
 function listModes(model: Model): ListModes {
     const caps = model.listCapabilities ?? NO_CAPABILITIES;
@@ -173,7 +173,7 @@ function generateListPage(model: Model, router: Router): string {
 
     const pagination =
         modes.paging === 'server'
-            ? `${modes.caps.totalKey ? `const total = (data as Record<string, unknown> | undefined)?.[${JSON.stringify(modes.caps.totalKey)}];
+            ? `${modes.caps.totalPath ? `const total = (data as Record<string, any> | undefined)${modes.caps.totalPath.map(key => `?.[${JSON.stringify(key)}]`).join('')};
     const pageCount = typeof total === "number" ? Math.max(1, Math.ceil(total / PAGE_SIZE)) : undefined;` : 'const pageCount: number | undefined = undefined;'}
     const currentPage = page;
     const hasNextPage = pageCount !== undefined ? currentPage < pageCount - 1 : rows.length >= PAGE_SIZE;
@@ -211,12 +211,19 @@ const columns: { key: string; label: string; format?: string; sortable: boolean 
 type Row = Record<string, any>;${hasSort ? `
 type Sort = { key: string; direction: "asc" | "desc" } | null;` : ''}
 
-// Accept plain arrays and paginated responses such as { data: [...] } or { items: [...] }
-function extractRows(data: unknown): Row[] {
+// Accept plain arrays and wrapped responses: { items: [...] }, { success, data: [...] }, { data: { items: [...] } }
+function extractRows(data: unknown, depth = 0): Row[] {
     if (Array.isArray(data)) return data;
     if (data && typeof data === "object") {
-        const list = Object.values(data).find(Array.isArray);
+        const values = Object.values(data);
+        const list = values.find(Array.isArray);
         if (list) return list;
+        if (depth === 0) {
+            for (const value of values) {
+                const rows = extractRows(value, 1);
+                if (rows.length > 0) return rows;
+            }
+        }
     }
     return [];
 }${modes.sort === 'client' ? `

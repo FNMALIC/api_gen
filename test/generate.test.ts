@@ -103,6 +103,19 @@ test('React Router output with zod response validation type-checks', async () =>
     typecheck(dir);
 });
 
+test('wrapped { success, data } responses: unwrapped records, nested totals, working edit page', async () => {
+    const { dir, read } = await generateFixture('wrapped.yaml', { zod: true });
+    const api = read('api/users.ts');
+    assert.match(api, /export const getUser = async \(id: number, config\?: AxiosRequestConfig\): Promise<User> =>/);
+    assert.match(api, /return unwrap<User>\([^]*, "data"\);/);
+    assert.match(api, /function unwrap<T>/);
+    assert.doesNotMatch(read('api/events.ts'), /unwrap/, 'a resource with its own data field is not unwrapped');
+    // The edit page gets the record itself, so the form is prefilled
+    assert.match(read('pages/users/EditUser.tsx'), /defaultValues=\{data\}/);
+    assert.match(read('pages/users/UsersList.tsx'), /\?\.\["meta"\]\?\.\["total"\]/);
+    typecheck(dir);
+});
+
 test('Swagger 2.0 input generates a working project', async () => {
     const { dir, exists, read } = await generateFixture('petstore-swagger2.yaml', { zod: true });
     assert.ok(exists('api/pets.ts'));

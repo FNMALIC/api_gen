@@ -271,33 +271,25 @@ async function handle(route: Route) {
     return route.fulfill({ status: 404, json: { message: `No mock for ${method} ${url.pathname}` } });
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-
-describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 * 60_000 }, () => {
-    let server: ChildProcess | undefined;
-    let browser: Browser | undefined;
-    let page: Page;
-    let baseUrl = '';
-    const pageErrors: string[] = [];
-
-    before(async () => {
-        installApp();
-        for (const dir of ['api', 'types', 'schemas', 'hooks', 'pages', 'utils', 'components/api-gen']) {
-            fs.rmSync(path.join(APP, 'src', dir), { recursive: true, force: true });
-        }
-        fs.rmSync(path.join(APP, 'src', '.api-gen-manifest.json'), { force: true });
-        await generate({ input: path.join(ROOT, 'test', 'fixtures', 'shop.json'), output: path.join(APP, 'src'), zod: true });
-        writeFile(
-            'src/main.tsx',
-            `import { StrictMode } from "react";
+// Regenerate the dashboard for a fixture into the app, replacing the previous one
+async function generateInto(fixture: string) {
+    for (const dir of ['api', 'types', 'schemas', 'hooks', 'pages', 'utils', 'components/api-gen']) {
+        fs.rmSync(path.join(APP, 'src', dir), { recursive: true, force: true });
+    }
+    fs.rmSync(path.join(APP, 'src', '.api-gen-manifest.json'), { force: true });
+    await generate({ input: path.join(ROOT, 'test', 'fixtures', fixture), output: path.join(APP, 'src'), zod: true });
+    const hasAuth = fs.existsSync(path.join(APP, 'src', 'utils', 'auth.ts'));
+    writeFile(
+        'src/main.tsx',
+        `import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { dashboardRoutes } from "./pages/routes";
-import { setCredentials } from "./utils/auth";
+import { dashboardRoutes } from "./pages/routes";${hasAuth ? `
+import { setCredentials } from "./utils/auth";` : ''}
 import "./index.css";
-
-setCredentials("bearerAuth", () => "secret-token");
+${hasAuth ? `
+setCredentials("bearerAuth", () => "secret-token");` : ''}
 const router = createBrowserRouter(dashboardRoutes);
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -309,7 +301,37 @@ createRoot(document.getElementById("root")!).render(
     </StrictMode>
 );
 `
-        );
+    );
+}
+
+function typecheckApp() {
+    execFileSync(process.execPath, appBin('typescript', 'tsc', ['-p', APP]), { cwd: APP, stdio: 'inherit' });
+}
+
+async function buildAndServe(): Promise<{ server: ChildProcess; baseUrl: string }> {
+    execFileSync(process.execPath, appBin('vite', 'vite', ['build', '--logLevel', 'warn']), { cwd: APP, stdio: 'inherit' });
+    const port = await freePort();
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const server = spawn(process.execPath, appBin('vite', 'vite', ['preview', '--port', String(port), '--strictPort', '--host', '127.0.0.1']), {
+        cwd: APP,
+        stdio: 'ignore',
+    });
+    await waitForServer(baseUrl);
+    return { server, baseUrl };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+
+describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 * 60_000 }, () => {
+    let server: ChildProcess | undefined;
+    let browser: Browser | undefined;
+    let page: Page;
+    let baseUrl = '';
+    const pageErrors: string[] = [];
+
+    before(async () => {
+        installApp();
+        await generateInto('shop.json');
     });
 
     after(async () => {
@@ -317,20 +339,10 @@ createRoot(document.getElementById("root")!).render(
         server?.kill();
     });
 
-    it('type-checks against the real components with strict settings', () => {
-        execFileSync(process.execPath, appBin('typescript', 'tsc', ['-p', APP]), { cwd: APP, stdio: 'inherit' });
-    });
+    it('type-checks against the real components with strict settings', typecheckApp);
 
     it('builds and serves', async () => {
-        execFileSync(process.execPath, appBin('vite', 'vite', ['build', '--logLevel', 'warn']), { cwd: APP, stdio: 'inherit' });
-        const port = await freePort();
-        baseUrl = `http://127.0.0.1:${port}`;
-        server = spawn(process.execPath, appBin('vite', 'vite', ['preview', '--port', String(port), '--strictPort', '--host', '127.0.0.1']), {
-            cwd: APP,
-            stdio: 'ignore',
-        });
-        await waitForServer(baseUrl);
-
+        ({ server, baseUrl } = await buildAndServe());
         browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
         page = await browser.newPage();
         page.on('pageerror', error => pageErrors.push(error.message));
@@ -467,6 +479,119 @@ createRoot(document.getElementById("root")!).render(
         assert.match(api.lastContentType, /^multipart\/form-data/);
         assert.match(api.lastRawBody, /filename="contract.pdf"/);
         assert.match(api.lastRawBody, /name="title"\r\n\r\nContract/);
+    });
+
+    it('had no uncaught errors in the page', () => {
+        assert.deepEqual(pageErrors, []);
+    });
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// An API that wraps every response: { success, data, meta } (test/fixtures/wrapped.yaml)
+
+describe('generated dashboard for an API with { success, data } envelopes', { timeout: 20 * 60_000 }, () => {
+    let server: ChildProcess | undefined;
+    let browser: Browser | undefined;
+    let page: Page;
+    let baseUrl = '';
+    const pageErrors: string[] = [];
+    let users: Array<{ id: number; name: string; nickname?: string; active?: boolean }> = [];
+    let lastBody: unknown = null;
+    const queries: Array<Record<string, string>> = [];
+
+    const envelope = (data: unknown, extra: Record<string, unknown> = {}) => ({ json: { success: true, data, ...extra } });
+
+    async function handleWrapped(route: Route) {
+        const request = route.request();
+        const url = new URL(request.url());
+        const method = request.method();
+        const match = url.pathname.match(/^\/api\/users\/(\d+)$/);
+
+        if (url.pathname === '/api/users' && method === 'GET') {
+            const query = Object.fromEntries(url.searchParams);
+            queries.push(query);
+            const limit = Number(query.limit);
+            const pageNumber = Number(query.page);
+            return route.fulfill(envelope(users.slice((pageNumber - 1) * limit, pageNumber * limit), { meta: { total: users.length, page: pageNumber } }));
+        }
+        if (url.pathname === '/api/users' && method === 'POST') {
+            lastBody = request.postDataJSON();
+            // Some APIs report failures with HTTP 200 and success: false
+            return route.fulfill({ json: { success: false, message: 'Name already taken' } });
+        }
+        if (match && method === 'GET') return route.fulfill(envelope(users.find(user => user.id === Number(match[1]))));
+        if (match && method === 'PUT') {
+            lastBody = request.postDataJSON();
+            users = users.map(user => (user.id === Number(match[1]) ? { ...user, ...(lastBody as object) } : user));
+            return route.fulfill(envelope(users.find(user => user.id === Number(match[1]))));
+        }
+        if (match && method === 'DELETE') {
+            users = users.filter(user => user.id !== Number(match[1]));
+            return route.fulfill({ json: { success: true, message: 'Deleted' } });
+        }
+        return route.fulfill({ status: 404, json: { success: false, message: `No mock for ${method} ${url.pathname}` } });
+    }
+
+    before(async () => {
+        installApp();
+        await generateInto('wrapped.yaml');
+        users = Array.from({ length: 25 }, (_, i) => ({ id: i + 1, name: `User ${String(i + 1).padStart(2, '0')}`, nickname: `nick${i + 1}`, active: i % 2 === 0 }));
+    });
+
+    after(async () => {
+        await browser?.close();
+        server?.kill();
+    });
+
+    it('type-checks against the real components with strict settings', typecheckApp);
+
+    it('builds and serves', async () => {
+        ({ server, baseUrl } = await buildAndServe());
+        browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+        page = await browser.newPage();
+        page.on('pageerror', error => pageErrors.push(error.message));
+        await page.route('**/api/**', handleWrapped);
+    });
+
+    const mainText = async () => (await page.locator('main').innerText()).replace(/\s+/g, ' ');
+
+    it('lists rows from the envelope and reads the total from meta.total', async () => {
+        await page.goto(`${baseUrl}/users`);
+        await page.getByText('User 01').waitFor();
+        assert.equal((await mainText()).match(/User \d+/g)?.length, 10);
+        assert.match(await mainText(), /Page 1 of 3/);
+        assert.deepEqual(queries.at(-1), { page: '1', limit: '10' });
+    });
+
+    it('prefills the edit form from the wrapped record and saves it', async () => {
+        await page.goto(`${baseUrl}/users/3`);
+        await page.locator('input[name=name]').waitFor();
+        assert.equal(await page.locator('input[name=name]').inputValue(), 'User 03');
+        assert.equal(await page.locator('input[name=nickname]').inputValue(), 'nick3');
+
+        await page.locator('input[name=nickname]').fill('third');
+        await page.getByRole('button', { name: 'Save' }).click();
+        await page.waitForURL(`${baseUrl}/users`);
+        assert.deepEqual(lastBody, { name: 'User 03', nickname: 'third', active: true });
+        await page.getByText('User updated').waitFor();
+    });
+
+    it('treats success: false as an error and shows its message', async () => {
+        await page.goto(`${baseUrl}/users/create`);
+        await page.locator('input[name=name]').fill('Taken');
+        await page.getByRole('button', { name: 'Create' }).click();
+        await page.getByText('Name already taken').waitFor();
+        assert.equal(new URL(page.url()).pathname, '/users/create', 'stays on the form');
+    });
+
+    it('deletes through a status-only response', async () => {
+        await page.goto(`${baseUrl}/users`);
+        await page.getByText('User 01').waitFor();
+        await page.getByRole('button', { name: 'Delete' }).first().click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+        await page.getByText('User deleted').waitFor();
+        await page.getByText('User 11').waitFor();
+        assert.ok(!users.some(user => user.id === 1));
     });
 
     it('had no uncaught errors in the page', () => {

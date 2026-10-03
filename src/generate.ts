@@ -30,6 +30,11 @@ export interface GenerateOptions {
     prefix?: string;
     /** Group operations into resources by first path segment or by first tag (default "path") */
     groupBy?: 'path' | 'tag';
+    /**
+     * Wrapped responses such as { success, data }: by default detected automatically and unwrapped for single
+     * records. A property name forces that payload key; false turns unwrapping off.
+     */
+    envelope?: string | false;
     /** Validate JSON responses at runtime with generated zod schemas */
     zod?: boolean;
     /** Template overrides, or a path to a module exporting them */
@@ -157,7 +162,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
     const api = await loadSpec(input);
     const context = createTypeContext(api);
-    const { models, skipped } = buildModels(api, context, { prefix, groupBy });
+    const { models, skipped } = buildModels(api, context, { prefix, groupBy, envelope: options.envelope });
     if (models.length === 0) {
         throw new Error(prefix !== undefined ? `No paths start with the prefix "${prefix}".` : 'No operations found in the document.');
     }

@@ -1,0 +1,104 @@
+openapi: 3.0.3
+info: {title: Wrapped responses, version: "1.0"}
+paths:
+  /api/users:
+    get:
+      operationId: listUsers
+      parameters:
+        - {name: page, in: query, schema: {type: integer}}
+        - {name: limit, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: A page of users in an envelope, total under meta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/User'}}
+                  meta:
+                    type: object
+                    properties:
+                      total: {type: integer}
+                      page: {type: integer}
+    post:
+      operationId: createUser
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/UserInput'}}}}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/UserEnvelope'}}}}
+  /api/users/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get:
+      operationId: getUser
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/UserEnvelope'}}}}
+    put:
+      operationId: updateUser
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/UserInput'}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/UserEnvelope'}}}}
+    delete:
+      operationId: deleteUser
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema: {type: object, properties: {success: {type: boolean}, message: {type: string}}}
+  /api/teams:
+    get:
+      responses:
+        "200":
+          description: A list wrapped twice
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data:
+                    type: object
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/Team'}}
+                      totalCount: {type: integer}
+  /api/events:
+    get:
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Event'}}}}}
+  /api/events/{id}:
+    get:
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses:
+        "200":
+          description: An event that has its own "data" field, which is not an envelope
+          content: {application/json: {schema: {$ref: '#/components/schemas/Event'}}}
+components:
+  schemas:
+    UserInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        nickname: {type: string}
+        active: {type: boolean}
+    User:
+      allOf:
+        - $ref: '#/components/schemas/UserInput'
+        - type: object
+          properties: {id: {type: integer, readOnly: true}}
+    UserEnvelope:
+      type: object
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/User'}
+    Team:
+      type: object
+      properties: {id: {type: integer}, title: {type: string}}
+    Event:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        data: {type: object, additionalProperties: true}

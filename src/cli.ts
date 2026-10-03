@@ -17,6 +17,7 @@ interface CliOptions {
     prefix?: string;
     groupBy: 'path' | 'tag';
     zod?: boolean;
+    envelope?: string | false;
     templates?: string;
     clean: boolean;
     format: boolean;
@@ -40,6 +41,8 @@ program
     .option('--base-url <url>', 'axios baseURL used when utils/api.ts is first created (default: the document\'s first server URL, else /)')
     .option('--prefix <path>', 'path prefix before the resource name, e.g. /api/v1 (default: auto-detects /api and /v1 style segments)')
     .addOption(new Option('--group-by <mode>', 'group operations into resources by first path segment or by tag').choices(['path', 'tag']).default('path'))
+    .option('--envelope <key>', 'payload property of wrapped responses like { success, data } (default: detected automatically)')
+    .option('--no-envelope', 'never unwrap responses')
     .option('--zod', 'validate JSON responses at runtime with generated zod schemas')
     .option('--templates <module>', 'JS module exporting template overrides')
     .option('--no-clean', 'keep files from earlier runs that are no longer generated')
@@ -61,6 +64,7 @@ program
             prefix: pick('prefix'),
             groupBy: pick('groupBy'),
             zod: pick('zod'),
+            envelope: pick('envelope'),
             templates: pick('templates'),
             clean: pick('clean'),
             format: pick('format'),

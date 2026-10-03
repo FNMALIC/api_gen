@@ -76,7 +76,7 @@ interface Entry {
     split: PrefixSplit | null;
 }
 
-function buildOperation(api: OpenAPIDocument, context: TypeContext, entry: Entry): Operation {
+function buildOperation(api: OpenAPIDocument, context: TypeContext, entry: Entry, envelopeOption: EnvelopeOption): Operation {
     const { path, method, operation } = entry;
 
     // Path-level parameters apply unless the operation overrides them
@@ -127,6 +127,11 @@ function buildOperation(api: OpenAPIDocument, context: TypeContext, entry: Entry
         responseIsJson = /json/i.test(media.contentType);
     }
 
+    // { success, data: User } -> return the User. Lists keep their envelope so totals in "meta" stay reachable,
+    // and status-only bodies ({ success, message }) are returned as they are; both still fail on success: false.
+    const detected = responseIsJson ? detectEnvelope(context, responseSchema, envelopeOption) : null;
+    const unwrapped = detected?.schema && schemaType(context.deref(detected.schema) || {}) !== 'array' ? detected : null;
+
     return {
         method,
         path,
@@ -141,6 +146,8 @@ function buildOperation(api: OpenAPIDocument, context: TypeContext, entry: Entry
         body,
         responseSchema,
         responseIsJson,
+        envelope: detected ? { key: unwrapped ? detected.key : null } : null,
+        returnSchema: unwrapped?.schema ?? responseSchema,
         crud: null,
         functionName: '',
     };
@@ -227,16 +234,63 @@ function resolveObject(
     if (!schema.properties) return null;
 
     if (unwrapList) {
-        // Paginated responses such as { data: [...], total: 10 } -> the item schema
-        const listProperty = Object.values(schema.properties)
-            .map(prop => context.deref(prop))
-            .find(prop => prop && prop.type === 'array');
-        if (listProperty && listProperty.items) {
-            const items = resolveObject(context, listProperty.items);
-            if (items) return items;
+        // Paginated responses such as { data: [...], total: 10 } or { success, data: { items: [...] } } -> the item schema
+        const items = findListItems(context, schema, 0);
+        if (items) {
+            const resolved = resolveObject(context, items);
+            if (resolved) return resolved;
         }
     }
     return { properties: schema.properties, required: schema.required || [] };
+}
+
+// The item schema of the first array property, looking one object level deep
+function findListItems(context: TypeContext, schema: SchemaObject, depth: number): SchemaObject | null {
+    const properties = Object.values(schema.properties ?? {}).map(prop => context.deref(prop)).filter(prop => !!prop);
+    const list = properties.find(prop => schemaType(prop) === 'array' && prop.items);
+    if (list) return list.items ?? null;
+    if (depth >= 1) return null;
+    for (const prop of properties) {
+        const nested = schemaType(prop) === 'object' ? resolveObject(context, prop) : null;
+        const items = nested ? findListItems(context, { properties: nested.properties }, depth + 1) : null;
+        if (items) return items;
+    }
+    return null;
+}
+
+/** "auto" (default): detect { success, data } style envelopes; a string: the payload property; false: never unwrap */
+export type EnvelopeOption = string | false | undefined;
+
+const ENVELOPE_KEYS = ['data', 'result', 'payload'];
+const ENVELOPE_METADATA = new Set([
+    'success', 'ok', 'status', 'statuscode', 'status_code', 'code', 'message', 'messages', 'error', 'errors',
+    'meta', 'metadata', 'timestamp', 'links', 'pagination', 'requestid', 'request_id', 'traceid', 'trace_id',
+]);
+
+/**
+ * A response that wraps its payload: { success: true, data: {...} }.
+ * Auto-detection requires every other property to be metadata, so a resource that merely has its own "data"
+ * field ({ id, name, data }) is left alone.
+ */
+function detectEnvelope(
+    context: TypeContext,
+    schema: SchemaObject | null,
+    option: EnvelopeOption
+): { key: string | null; schema: SchemaObject | null } | null {
+    if (option === false || !schema) return null;
+    const raw = context.deref(schema);
+    if (!raw || schemaType(raw) === 'array') return null;
+    const resolved = resolveObject(context, raw);
+    if (!resolved) return null;
+    const keys = Object.keys(resolved.properties);
+    if (typeof option === 'string') {
+        return keys.includes(option) ? { key: option, schema: resolved.properties[option] } : null;
+    }
+    const key = keys.find(name => ENVELOPE_KEYS.includes(name)) ?? null;
+    if (!keys.every(name => name === key || ENVELOPE_METADATA.has(name.toLowerCase()))) return null;
+    // Without a payload key it is a status-only body; it counts only if it reports success/ok
+    if (!key && !keys.some(name => ['success', 'ok'].includes(name.toLowerCase()))) return null;
+    return { key, schema: key ? resolved.properties[key] : null };
 }
 
 function schemaType(prop: SchemaObject): string {
@@ -334,17 +388,6 @@ function listCapabilities(context: TypeContext, list: Operation | undefined): Li
         if (schema.minimum === 0 || schema.default === 0) pageBase = 0;
     }
 
-    let totalKey: string | null = null;
-    const response = context.deref(list.responseSchema);
-    const properties = response?.properties;
-    if (properties) {
-        totalKey =
-            Object.keys(properties).find(
-                key =>
-                    TOTAL_NAMES.includes(key.toLowerCase()) &&
-                    ['integer', 'number'].includes(schemaType(context.deref(properties[key]) || {}))
-            ) || null;
-    }
 
     const serverPaging = !!((page || offset) && size);
     return {
@@ -354,8 +397,26 @@ function listCapabilities(context: TypeContext, list: Operation | undefined): Li
         size: serverPaging && size ? { name: size.name } : null,
         search: search ? { name: search.name } : null,
         sort: sort ? { name: sort.name, direction: direction ? directionValues(context, direction) : null } : null,
-        totalKey,
+        totalPath: findTotalPath(context, list.returnSchema, 0),
     };
+}
+
+// Where the total count is: { total }, { meta: { total } }, { data: { items, totalCount } }, ...
+function findTotalPath(context: TypeContext, schema: SchemaObject | null | undefined, depth: number): string[] | null {
+    const raw = context.deref(schema);
+    if (!raw || schemaType(raw) === 'array') return null;
+    const resolved = resolveObject(context, raw);
+    if (!resolved) return null;
+    const entries = Object.entries(resolved.properties).map(([key, prop]) => [key, context.deref(prop) || {}] as const);
+    const total = entries.find(([key, prop]) => TOTAL_NAMES.includes(key.toLowerCase()) && ['integer', 'number'].includes(schemaType(prop)));
+    if (total) return [total[0]];
+    if (depth >= 2) return null;
+    for (const [key, prop] of entries) {
+        if (schemaType(prop) !== 'object') continue;
+        const nested = findTotalPath(context, prop, depth + 1);
+        if (nested) return [key, ...nested];
+    }
+    return null;
 }
 
 /**
@@ -366,7 +427,7 @@ function listCapabilities(context: TypeContext, list: Operation | undefined): Li
 export function buildModels(
     api: OpenAPIDocument,
     context: TypeContext,
-    { prefix, groupBy = 'path' }: { prefix?: string; groupBy?: 'path' | 'tag' } = {}
+    { prefix, groupBy = 'path', envelope }: { prefix?: string; groupBy?: 'path' | 'tag'; envelope?: EnvelopeOption } = {}
 ): { models: Model[]; skipped: string[] } {
     const groups = new Map<string, Entry[]>();
     const skipped: string[] = [];
@@ -426,7 +487,7 @@ export function buildModels(
             model.basePath = '/' + [...prefixSegments, rest[0]].join('/');
         }
 
-        model.operations = entries.map(entry => buildOperation(api, context, entry));
+        model.operations = entries.map(entry => buildOperation(api, context, entry, envelope));
         model.crud = classifyCrud(model);
 
         const usedNames = new Set();
@@ -442,12 +503,12 @@ export function buildModels(
         model.formFields = firstFields(context, [
             [create && create.body && create.body.schema],
             [update && update.body && update.body.schema],
-            [retrieve && retrieve.responseSchema],
-            [list && list.responseSchema, { unwrapList: true }],
+            [retrieve && retrieve.returnSchema],
+            [list && list.returnSchema, { unwrapList: true }],
         ]);
         model.columns = firstFields(context, [
-            [list && list.responseSchema, { unwrapList: true }],
-            [retrieve && retrieve.responseSchema],
+            [list && list.returnSchema, { unwrapList: true }],
+            [retrieve && retrieve.returnSchema],
             [create && create.body && create.body.schema],
         ]);
         model.listCapabilities = listCapabilities(context, list);

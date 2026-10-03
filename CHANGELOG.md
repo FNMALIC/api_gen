@@ -1,6 +1,23 @@
 # Changelog
 
-## 2.0.0 (unreleased)
+## 2.1.0 (unreleased)
+
+### Added
+
+- Wrapped responses such as `{ success, data, message, meta }` are detected and handled:
+  - API functions for single records return the payload (`getUser(id): Promise<User>`), so edit forms are prefilled.
+    Previously they returned the envelope and the edit form came up empty.
+  - A body with `success: false` (or `ok: false`) is thrown as an error with the server's message, even with HTTP 200.
+  - Lists keep their envelope so metadata stays available; their rows are found inside it.
+  - `--envelope <key>` forces the payload property; `--no-envelope` turns unwrapping off.
+- Totals nested in list responses, such as `meta.total` or `data.totalCount`, are used for "Page x of y".
+
+### Changed
+
+- For APIs with wrapped responses, the return types of the generated functions for single records change from the
+  envelope to the record. Code calling them directly should drop its own `.data`.
+
+## 2.0.0 (2026-10-03)
 
 A rewrite. Generated projects now compile under strict TypeScript and are tested end to end in a browser.
 

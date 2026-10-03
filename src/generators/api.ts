@@ -148,7 +148,20 @@ interface Used {
     schemas: Set<string>;
     auth: boolean;
     zod: boolean;
+    unwrap: boolean;
 }
+
+// Added to API files whose responses are wrapped, e.g. { success: true, data: {...} }
+const UNWRAP_HELPER = `
+/** Return the payload of a wrapped response (or the whole body), or throw the server's message when it reports a failure */
+function unwrap<T>(envelope: object, key: string | null): T {
+    const body = envelope as Record<string, unknown>;
+    if (body.success === false || body.ok === false) {
+        const message = body.message ?? body.error;
+        throw new Error(typeof message === "string" && message ? message : "Request failed");
+    }
+    return (key === null ? body : body[key]) as T;
+}`;
 
 function generateFunction(
     op: Operation,
@@ -173,7 +186,9 @@ function generateFunction(
     }
     args.push('config?: AxiosRequestConfig');
 
-    const responseType = op.responseSchema ? context.tsType(op.responseSchema, used.types) : 'void';
+    // What the server sends, and what the function returns (the payload when the response is an envelope)
+    const bodyType = op.responseSchema ? context.tsType(op.responseSchema, used.types) : 'void';
+    const responseType = op.returnSchema ? context.tsType(op.returnSchema, used.types) : 'void';
     const url = '`' + op.path.replace(/\{([^}]+)\}/g, (_match: string, name: string) => {
         const param = op.pathParams.find(p => p.name === name);
         return `\${encodeURIComponent(String(${param ? param.identifier : name}))}`;
@@ -197,9 +212,9 @@ function generateFunction(
 
     let call: string;
     if (['post', 'put', 'patch'].includes(op.method)) {
-        call = `instance.${op.method}<${responseType}>(${url}, ${op.body ? 'body' : 'undefined'}, ${requestConfig})`;
+        call = `instance.${op.method}<${bodyType}>(${url}, ${op.body ? 'body' : 'undefined'}, ${requestConfig})`;
     } else {
-        call = `instance.${op.method}<${responseType}>(${url}, ${requestConfig})`;
+        call = `instance.${op.method}<${bodyType}>(${url}, ${requestConfig})`;
     }
 
     let result = 'data';
@@ -209,6 +224,10 @@ function generateFunction(
         const expression = zodContext.zod(op.responseSchema, usedSchemas);
         usedSchemas.forEach(name => used.schemas.add(name));
         result = `${expression}.parse(data)`;
+    }
+    if (op.envelope) {
+        used.unwrap = true;
+        result = `unwrap<${responseType}>(${result}, ${JSON.stringify(op.envelope.key)})`;
     }
 
     return `${jsDoc(op)}export const ${op.functionName} = async (${args.join(', ')}): Promise<${responseType}> => {
@@ -230,7 +249,7 @@ export function generateAPIFiles(
     const schemeNames = Object.keys((api.components && api.components.securitySchemes) || {});
     const files: FileMap = {};
     for (const model of models) {
-        const used: Used = { types: new Set(), schemas: new Set(), auth: false, zod: false };
+        const used: Used = { types: new Set(), schemas: new Set(), auth: false, zod: false, unwrap: false };
         const functions = model.operations.map(op => generateFunction(op, { context, zodContext, schemeNames }, used));
 
         const imports = ['import type { AxiosRequestConfig } from "axios";'];
@@ -243,7 +262,7 @@ export function generateAPIFiles(
         }
 
         files[`api/${model.name}.ts`] = `${HEADER}${imports.join('\n')}
-
+${used.unwrap ? UNWRAP_HELPER + '\n' : ''}
 ${functions.join('\n\n')}
 `;
     }

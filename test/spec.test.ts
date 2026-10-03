@@ -81,7 +81,7 @@ test('detects server-side pagination, search and sort parameters', async () => {
         size: { name: 'pageSize' },
         search: { name: 'search' },
         sort: { name: 'sortBy', direction: { name: 'sortOrder', asc: 'ASC', desc: 'DESC' } },
-        totalKey: 'total',
+        totalPath: ['total'],
     });
     assert.equal(orders.listCapabilities!.serverPaging, false);
 });
@@ -112,6 +112,39 @@ test('supports a custom prefix and grouping by tag', async () => {
     assert.deepEqual(Object.keys(byTag).sort(), ['Categories', 'Documents', 'Orders', 'Products', 'default']);
     assert.equal(byTag.Products.basePath, '/v1/products');
     assert.equal(byTag.Products.crud.retrieve!.functionName, 'getProduct');
+});
+
+test('unwraps { success, data } envelopes and finds nested totals', async () => {
+    const { users, teams, events } = await models('wrapped.yaml');
+    const op = (name: string) => [...users.operations, ...teams.operations, ...events.operations].find(o => o.functionName === name)!;
+
+    // Single records are unwrapped; lists and status-only bodies keep their shape but still fail on success: false
+    for (const name of ['getUser', 'createUser', 'updateUser']) assert.deepEqual(op(name).envelope, { key: 'data' }, name);
+    assert.deepEqual(op('listUsers').envelope, { key: null });
+    assert.deepEqual(op('deleteUser').envelope, { key: null });
+    assert.equal(op('getUser').returnSchema!.$ref, '#/components/schemas/User');
+
+    // An object payload is unwrapped even for lists: { success, data: { items, totalCount } }
+    assert.deepEqual(teams.crud.list!.envelope, { key: 'data' });
+    assert.deepEqual(teams.columns.map(f => f.name), ['id', 'title']);
+
+    // A resource with its own "data" field next to id and name is not an envelope
+    assert.equal(events.crud.retrieve!.envelope, null);
+    assert.deepEqual(events.columns.map(f => f.name), ['id', 'name', 'data']);
+
+    // Fields come from the payload, not the envelope
+    assert.deepEqual(users.columns.map(f => f.name), ['name', 'nickname', 'active', 'id']);
+    assert.deepEqual(users.listCapabilities!.totalPath, ['meta', 'total']);
+    assert.equal(users.listCapabilities!.serverPaging, true);
+});
+
+test('envelope option: an explicit key or false', async () => {
+    const off = await models('wrapped.yaml', { envelope: false });
+    assert.ok(off.users.operations.every(o => o.envelope === null));
+
+    const explicit = await models('wrapped.yaml', { envelope: 'data' });
+    // With an explicit key, any response carrying that property counts, including events' own "data" field
+    assert.deepEqual(explicit.events.crud.retrieve!.envelope, { key: 'data' });
 });
 
 test('converts Swagger 2.0 documents', async () => {

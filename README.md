@@ -37,6 +37,7 @@ generate-api [input] [output] [options]
 | `--base-url <url>` | axios `baseURL` when `utils/api.ts` is first created (default: the document's first server URL, else `/`) |
 | `--prefix <path>` | Path prefix before the resource name, e.g. `/api/v1`. By default leading `api` and `v1`-style segments are skipped |
 | `--group-by <mode>` | Group operations into resources by first path segment (`path`, default) or by first tag (`tag`) |
+| `--envelope <key>` / `--no-envelope` | Payload property of wrapped responses like `{ success, data }` (detected automatically by default), or never unwrap |
 | `--zod` | Generate zod schemas and validate JSON responses at runtime |
 | `--templates <module>` | JS module exporting template overrides (see below) |
 | `--no-clean` | Keep files from earlier runs that are no longer generated |
@@ -141,7 +142,7 @@ error message (`message`, `detail` or `error` in the response body) into `error.
 
 When the list endpoint has a page (`page`) or offset (`offset`, `skip`) parameter **and** a page-size parameter
 (`limit`, `pageSize`, `per_page`, ...), the table pages on the server and reads the total from a `total`/`count`
-property of the response. Search (`search`, `q`, ...) and sort parameters (`sort`/`sortBy` with an optional
+property of the response, also when nested (`meta.total`, `data.totalCount`). Search (`search`, `q`, ...) and sort parameters (`sort`/`sortBy` with an optional
 `order`/`sortOrder`, or `ordering` with `-field` for descending) are sent to the server too. Otherwise the table
 searches, sorts and paginates the returned rows in the browser.
 
@@ -162,6 +163,20 @@ searches, sorts and paginates the returned rows in the browser.
 
 Read-only properties are left out of forms, write-only ones out of tables, and cleared optional inputs out of the
 request.
+
+### Wrapped responses
+
+APIs that wrap every response, like `{ "success": true, "data": { ... }, "message": "..." }`, are detected
+automatically: an object with a `data`, `result` or `payload` property whose other properties are metadata
+(`success`, `message`, `meta`, `errors`, `status`, ...). For those responses:
+
+- functions returning a single record return the payload (`getUser(id): Promise<User>`), so hooks and edit forms
+  get the record itself;
+- a body with `success: false` or `ok: false` is thrown as an error carrying the server's `message`, even with HTTP 200;
+- lists keep their envelope, so totals like `meta.total` are found and used for pagination.
+
+A resource that merely has its own `data` field next to `id` and `name` is not mistaken for an envelope. Use
+`--envelope result` to name the payload property explicitly, or `--no-envelope` to turn this off.
 
 ### Vendor extensions
 
