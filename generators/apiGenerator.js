@@ -43,11 +43,50 @@ function generateInterfaces(details, components, capitalizedModelName) {
     return { paramsInterface, payloadInterface };
 }
 
+// Resolve an object schema's properties, following a $ref or an array's items if needed
+function resolveObjectSchema(schema, components) {
+    if (!schema) return null;
+    if (schema.$ref) {
+        const refName = schema.$ref.split('/').pop();
+        return resolveObjectSchema((components.schemas || {})[refName], components);
+    }
+    if (schema.type === 'array') return resolveObjectSchema(schema.items, components);
+    return schema.properties ? schema : null;
+}
+
+// Extract the model fields used by the dashboard from an operation's request body or response
+function extractFields(details, components) {
+    const candidates = [];
+    if (details.requestBody && details.requestBody.content) {
+        Object.values(details.requestBody.content).forEach(media => candidates.push(media.schema));
+    }
+    Object.values(details.responses || {}).forEach(response => {
+        Object.values(response.content || {}).forEach(media => candidates.push(media.schema));
+    });
+
+    for (const candidate of candidates) {
+        const schema = resolveObjectSchema(candidate, components);
+        if (schema) {
+            const required = schema.required || [];
+            return Object.entries(schema.properties).map(([name, prop]) => ({
+                name,
+                type: prop.type || 'string',
+                format: prop.format,
+                enum: prop.enum,
+                readOnly: !!prop.readOnly,
+                required: required.includes(name),
+            }));
+        }
+    }
+    return null;
+}
+
 // Generate API method functions for each model and return a list of methods created for each model
 function generateAPIFunctions(paths, components) {
     const apiMethodsByModel = {};
     const interfaces = {};
     const methodsByModel = {};
+    const fieldsByModel = {};
 
     for (const [path, methods] of Object.entries(paths)) {
         const modelMatch = path.match(/^\/api\/([^/]+)/);
@@ -57,7 +96,7 @@ function generateAPIFunctions(paths, components) {
 
             if (!apiMethodsByModel[modelName]) {
                 apiMethodsByModel[modelName] = `import instance from "../utils/api";\n`;
-                apiMethodsByModel[modelName] += `import { ${capitalizedModelName}Params, ${capitalizedModelName}Payload } from "../types/${modelName}";\n\n`;
+                apiMethodsByModel[modelName] += `import type { ${capitalizedModelName}Params, ${capitalizedModelName}Payload } from "../types/${modelName}";\n\n`;
             }
 
             if (!methodsByModel[modelName]) {
@@ -84,11 +123,18 @@ function generateAPIFunctions(paths, components) {
                 `;
 
                 methodsByModel[modelName].push(functionName);
+
+                // Prefer request body fields (what forms submit), fall back to response fields
+                const fields = extractFields(details, components);
+                const existing = fieldsByModel[modelName];
+                if (fields && (!existing || (details.requestBody && !existing.fromRequestBody))) {
+                    fieldsByModel[modelName] = { fields, fromRequestBody: !!details.requestBody };
+                }
             }
         }
     }
 
-    return { apiMethodsByModel, interfaces, methodsByModel };
+    return { apiMethodsByModel, interfaces, methodsByModel, fieldsByModel };
 }
 
 // Write API and interface files
