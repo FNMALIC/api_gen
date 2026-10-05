@@ -26,6 +26,8 @@ A CLI that turns an OpenAPI document into a ready-to-use React data layer and ad
 
 Works with OpenAPI 3.0, 3.1 and Swagger 2.0 (converted automatically), as YAML or JSON, from a file or a URL.
 
+![From an OpenAPI file to a working admin: sign-in, filters, sorting, row selection, a detail page, form validation, dark mode and French](https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/demo.gif)
+
 ## Screenshots
 
 The [bookstore example](examples/README.md), generated from its OpenAPI document and design file and running
@@ -528,5 +530,8 @@ kind, validation, server errors per field, detail pages and tabs, edit, delete a
 phone menu, and for an API with sign-in: permissions, refresh tokens, sign-out and switching between French and
 English. It needs `npx playwright-core install chromium` once. Set `E2E_UI=fallback` to use
 minimal stand-in components when the shadcn registry can't be reached, and `E2E_REUSE=1` to skip reinstalling the app.
+
+`docs/demo.gif` is recorded with `node scripts/record-demo.ts <app>`, where `<app>` was made with
+`generate-api create <app> --example bookstore` (needs ffmpeg).
 
 Releases are published by GitHub Actions when a `v*` tag matching `package.json`'s version is pushed.
