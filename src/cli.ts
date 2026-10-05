@@ -2,7 +2,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { Command, Option } from 'commander';
 import { generate, watch, loadConfig, TARGETS, type GenerateOptions, type GenerateResult } from './generate.ts';
-import { SHADCN_COMPONENTS } from './generators/dashboard.ts';
+import { SHADCN_COMPONENTS, dashboardDependencies } from './generators/dashboard.ts';
 import type { RouterName, Target } from './model.ts';
 
 // src/ and dist/ both sit next to package.json
@@ -18,6 +18,13 @@ interface CliOptions {
     groupBy: 'path' | 'tag';
     zod?: boolean;
     envelope?: string | false;
+    title?: string;
+    locale?: 'en' | 'fr';
+    pageSize?: number;
+    primaryColor?: string;
+    radius?: string;
+    darkMode: boolean;
+    login: boolean;
     templates?: string;
     clean: boolean;
     format: boolean;
@@ -44,6 +51,13 @@ program
     .option('--envelope <key>', 'payload property of wrapped responses like { success, data } (default: detected automatically)')
     .option('--no-envelope', 'never unwrap responses')
     .option('--zod', 'validate JSON responses at runtime with generated zod schemas')
+    .option('--title <text>', 'dashboard title in the sidebar and on the login page (default: the document\'s info.title)')
+    .addOption(new Option('--locale <locale>', 'language of the dashboard').choices(['en', 'fr']))
+    .option('--page-size <rows>', 'rows per page in tables (default: 10)', (value: string) => Number(value))
+    .option('--primary-color <color>', 'primary color of buttons and highlights, e.g. "#2563eb"')
+    .option('--radius <size>', 'corner radius, e.g. "0.25rem" or "1rem"')
+    .option('--no-dark-mode', 'leave out the light/dark switch')
+    .option('--no-login', 'do not generate a login page even if the API has a sign-in endpoint')
     .option('--templates <module>', 'JS module exporting template overrides')
     .option('--no-clean', 'keep files from earlier runs that are no longer generated')
     .option('--no-format', 'skip Prettier formatting of the generated files')
@@ -51,6 +65,7 @@ program
     .action(async (inputArg: string | undefined, outputArg: string | undefined, opts: CliOptions, command: Command) => {
         const config = await loadConfig(opts.config);
         // Command-line flags win over the config file, which wins over the defaults
+        const fromCli = (name: string) => command.getOptionValueSource(name) === 'cli';
         const pick = <K extends keyof CliOptions & keyof GenerateOptions>(name: K): GenerateOptions[K] =>
             (command.getOptionValueSource(name) === 'cli' || config[name] === undefined ? opts[name] : config[name]) as GenerateOptions[K];
 
@@ -65,6 +80,16 @@ program
             groupBy: pick('groupBy'),
             zod: pick('zod'),
             envelope: pick('envelope'),
+            login: pick('login'),
+            ui: {
+                ...config.ui,
+                ...(fromCli('title') && { title: opts.title }),
+                ...(fromCli('locale') && { locale: opts.locale }),
+                ...(fromCli('pageSize') && { pageSize: opts.pageSize }),
+                ...(fromCli('primaryColor') && { primaryColor: opts.primaryColor }),
+                ...(fromCli('darkMode') && { darkModeToggle: opts.darkMode }),
+                ...(fromCli('radius') && { theme: { ...config.ui?.theme, radius: opts.radius } }),
+            },
             templates: pick('templates'),
             clean: pick('clean'),
             format: pick('format'),
@@ -90,8 +115,9 @@ program
         const result = await generate(options);
         report(result);
         if ((options.only ?? TARGETS).includes('dashboard')) {
-            console.log('\nThe dashboard uses shadcn/ui. In your app, run:');
+            console.log('\nThe dashboard uses shadcn/ui (Radix or Base UI). In your app, run:');
             console.log(`  npx shadcn@latest add ${SHADCN_COMPONENTS.join(' ')}`);
+            console.log(`  npm install ${dashboardDependencies(options.router ?? 'react-router').join(' ')}`);
         }
     });
 

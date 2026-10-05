@@ -8,6 +8,7 @@ import { generateAxiosInstanceFile, generateAuthFile, generateAPIFiles } from '.
 import { generateReactQueryHooks } from './generators/hooks.ts';
 import { generateCRUDDashboard, ROUTERS } from './generators/dashboard.ts';
 import { applyTemplate } from './helpers.ts';
+import { applyResourceOptions, resolveUi, type UiOptions } from './ui.ts';
 import type { FileMap, OpenAPIDocument, RouterName, Target, TemplateKind, Templates } from './model.ts';
 
 export const TARGETS: Target[] = ['api', 'hooks', 'dashboard'];
@@ -35,6 +36,10 @@ export interface GenerateOptions {
      * records. A property name forces that payload key; false turns unwrapping off.
      */
     envelope?: string | false;
+    /** Dashboard look and wording: title, locale, labels, page size, theme colors, per-resource labels */
+    ui?: UiOptions;
+    /** Generate a login page when the API has a sign-in endpoint (default true) */
+    login?: boolean;
     /** Validate JSON responses at runtime with generated zod schemas */
     zod?: boolean;
     /** Template overrides, or a path to a module exporting them */
@@ -162,7 +167,15 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
     const api = await loadSpec(input);
     const context = createTypeContext(api);
-    const { models, skipped } = buildModels(api, context, { prefix, groupBy, envelope: options.envelope });
+    const ui = resolveUi(options.ui, api.info?.title);
+    const built = buildModels(api, context, { prefix, groupBy, envelope: options.envelope });
+    const models = applyResourceOptions(built.models, ui);
+    const { skipped } = built;
+    const login = options.login === false ? null : built.login && { ...built.login, model: models.find(m => m.key === built.login!.model.key) ?? built.login.model };
+    // The signed-in token goes with the bearer-style security schemes
+    const bearerSchemes = Object.entries(api.components?.securitySchemes ?? {})
+        .filter(([, scheme]) => (scheme.type === 'http' && /^bearer$/i.test(scheme.scheme ?? '')) || scheme.type === 'oauth2' || scheme.type === 'openIdConnect')
+        .map(([name]) => name);
     if (models.length === 0) {
         throw new Error(prefix !== undefined ? `No paths start with the prefix "${prefix}".` : 'No operations found in the document.');
     }
@@ -196,10 +209,10 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
         }
     }
     if (only.includes('hooks')) {
-        addPerModel('hooks', generateReactQueryHooks(models));
+        addPerModel('hooks', generateReactQueryHooks(models, ui));
     }
     if (only.includes('dashboard')) {
-        const dashboard = generateCRUDDashboard(models, { router, templates });
+        const dashboard = generateCRUDDashboard(models, { router, templates, ui, login, bearerSchemes });
         Object.assign(files, dashboard.files);
         warnings.push(...dashboard.warnings);
     }

@@ -31,9 +31,16 @@ jobs:
         run: node bin/generate-api.js test/fixtures/users.yaml "$RUNNER_TEMP/out" && test -f "$RUNNER_TEMP/out/pages/routes.tsx"
 
   e2e:
-    # Generates a dashboard into a real Vite app with the real shadcn/ui components and clicks through it
+    # Generates dashboards into a real Vite app with the real shadcn/ui components and clicks through them:
+    # "classic" uses the Radix new-york style, "init" whatever `shadcn init` sets up today (Base UI)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        ui: [classic, init]
+    env:
+      E2E_UI: ${{ matrix.ui == 'init' && 'init' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

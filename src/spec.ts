@@ -2,7 +2,9 @@ import SwaggerParser from '@apidevtools/swagger-parser';
 import { camelCase, pascalCase, kebabCase, safeIdentifier, humanize, singularize, pluralize } from './helpers.ts';
 import { HTTP_METHODS } from './model.ts';
 import type {
+    Action,
     CrudAction,
+    LoginInfo,
     Field,
     HttpMethod,
     ListCapabilities,
@@ -31,8 +33,71 @@ export async function loadSpec(input: string): Promise<OpenAPIDocument> {
         const converted = await converter.convertObj(api, { patch: true, warnOnly: true });
         api = converted.openapi as OpenAPIDocument;
     }
-    await SwaggerParser.validate(JSON.parse(JSON.stringify(api)));
+    try {
+        await SwaggerParser.validate(JSON.parse(JSON.stringify(api)));
+    } catch (error) {
+        const details = (error as { details?: ValidationIssue[] }).details;
+        if (Array.isArray(details) && details.length > 0) throw new Error(formatValidationErrors(details));
+        throw error;
+    }
     return api;
+}
+
+interface ValidationIssue {
+    instancePath: string;
+    keyword: string;
+    message?: string;
+    params?: Record<string, unknown>;
+}
+
+// "/paths/~1users~1{id}/get/responses/200" -> paths["/users/{id}"].get.responses["200"]
+function readablePath(pointer: string): string {
+    const segments = pointer.split('/').slice(1).map(part => part.replace(/~1/g, '/').replace(/~0/g, '~'));
+    if (segments.length === 0) return '(document root)';
+    return segments
+        .map((segment, index) => (/^[A-Za-z_$][\w$]*$/.test(segment) ? `${index === 0 ? '' : '.'}${segment}` : `[${JSON.stringify(segment)}]`))
+        .join('');
+}
+
+function describeIssue(issue: ValidationIssue): string {
+    const params = issue.params ?? {};
+    switch (issue.keyword) {
+        case 'required':
+            return `missing "${String(params.missingProperty)}"`;
+        case 'additionalProperties':
+            return `unknown property "${String(params.additionalProperty)}"`;
+        case 'minItems':
+            return params.limit === 1 ? 'must not be empty (remove it or list at least one item)' : `needs at least ${String(params.limit)} items`;
+        case 'enum':
+            return `must be one of: ${(params.allowedValues as unknown[] | undefined)?.map(value => JSON.stringify(value)).join(', ')}`;
+        case 'type':
+            return `must be ${String(params.type)}`;
+        default:
+            return issue.message ?? issue.keyword;
+    }
+}
+
+/**
+ * The JSON-schema validator reports each problem several times: once where it is, and again for every
+ * oneOf/$ref alternative above it. Keep the deepest real problem per location, one line each.
+ */
+export function formatValidationErrors(details: ValidationIssue[]): string {
+    const real = details.filter(
+        issue => !['oneOf', 'anyOf', 'if'].includes(issue.keyword) && !(issue.keyword === 'required' && issue.params?.missingProperty === '$ref')
+    );
+    const issues = real.length > 0 ? real : details;
+    const deepest = issues.filter(
+        issue => !issues.some(other => other !== issue && other.instancePath.startsWith(`${issue.instancePath}/`))
+    );
+    const byPath = new Map<string, string[]>();
+    for (const issue of deepest) {
+        const messages = byPath.get(issue.instancePath) ?? [];
+        const message = describeIssue(issue);
+        if (!messages.includes(message)) messages.push(message);
+        byPath.set(issue.instancePath, messages);
+    }
+    const lines = [...byPath].map(([pointer, messages]) => `  ${readablePath(pointer)}: ${messages.join('; ')}`);
+    return `The OpenAPI document is invalid (${lines.length} problem${lines.length === 1 ? '' : 's'}):\n${lines.join('\n')}`;
 }
 
 const isParamSegment = (segment: string) => /^\{[^}]+\}$/.test(segment);
@@ -148,6 +213,7 @@ function buildOperation(api: OpenAPIDocument, context: TypeContext, entry: Entry
         responseIsJson,
         envelope: detected ? { key: unwrapped ? detected.key : null } : null,
         returnSchema: unwrapped?.schema ?? responseSchema,
+        xLabel: operation['x-label'],
         crud: null,
         functionName: '',
     };
@@ -428,7 +494,7 @@ export function buildModels(
     api: OpenAPIDocument,
     context: TypeContext,
     { prefix, groupBy = 'path', envelope }: { prefix?: string; groupBy?: 'path' | 'tag'; envelope?: EnvelopeOption } = {}
-): { models: Model[]; skipped: string[] } {
+): { models: Model[]; skipped: string[]; login: LoginInfo | null } {
     const groups = new Map<string, Entry[]>();
     const skipped: string[] = [];
 
@@ -470,7 +536,9 @@ export function buildModels(
             operations: [],
             crud: {},
             formFields: [],
+            editFields: [],
             columns: [],
+            actions: [],
             listCapabilities: null,
         };
         // Uncountable names (health, data) would otherwise give identical singular and plural identifiers
@@ -506,6 +574,12 @@ export function buildModels(
             [retrieve && retrieve.returnSchema],
             [list && list.returnSchema, { unwrapList: true }],
         ]);
+        model.editFields = firstFields(context, [
+            [update && update.body && update.body.schema],
+            [create && create.body && create.body.schema],
+            [retrieve && retrieve.returnSchema],
+        ]);
+        model.actions = findActions(context, model);
         model.columns = firstFields(context, [
             [list && list.returnSchema, { unwrapList: true }],
             [retrieve && retrieve.returnSchema],
@@ -516,6 +590,68 @@ export function buildModels(
         models.push(model);
     }
 
-    return { models, skipped };
+    return { models, skipped, login: findLogin(context, models) };
+}
+
+/**
+ * Item operations outside create/read/update/delete get a button on each row:
+ * POST /users/{id}/status, PUT /users/{id}/roles, DELETE /users/{id}/sessions, ...
+ */
+function findActions(context: TypeContext, model: Model): Action[] {
+    const escaped = model.basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^${escaped}/\\{[^}/]+\\}/([^/{}]+)$`);
+    const actions: Action[] = [];
+    for (const op of model.operations) {
+        const match = op.path.match(pattern);
+        if (!match || op.crud || op.method === 'get' || op.pathParams.length !== 1) continue;
+        if ([...op.queryParams, ...op.headerParams].some(param => param.required)) continue;
+        if (op.body?.multipart) continue;
+        const fields = op.body ? toFields(context, resolveObject(context, op.body.schema)) : null;
+        // A body we can't build a form for (not an object) leaves the action to the API functions
+        if (op.body && !fields) continue;
+        const label =
+            (typeof op.xLabel === 'string' && op.xLabel) ||
+            (op.summary && op.summary.length <= 40 ? op.summary : humanize(`${op.method === 'delete' ? 'remove ' : ''}${match[1]}`));
+        actions.push({ op, label, Name: pascalCase(op.functionName), fields });
+    }
+    return actions;
+}
+
+const LOGIN_PATH = /\/(login|log-in|signin|sign-in|sign_in|authenticate|token|tokens|session|sessions)$/i;
+const PASSWORD_FIELD = /^(password|pass|passwd|pwd|secret)$/i;
+const TOKEN_NAMES = ['accessToken', 'access_token', 'token', 'jwt', 'idToken', 'id_token', 'authToken', 'auth_token'];
+
+// Where the token is in a sign-in response: { token }, { accessToken }, { data: { token } }, { tokens: { accessToken } }
+function findTokenPath(context: TypeContext, schema: SchemaObject | null | undefined, depth: number): string[] | null {
+    const raw = context.deref(schema);
+    if (!raw) return null;
+    const resolved = resolveObject(context, raw);
+    if (!resolved) return null;
+    for (const name of TOKEN_NAMES) {
+        const prop = context.deref(resolved.properties[name]);
+        if (prop && schemaType(prop) === 'string') return [name];
+    }
+    if (depth >= 1) return null;
+    for (const [key, prop] of Object.entries(resolved.properties)) {
+        const resolvedProp = context.deref(prop);
+        if (!resolvedProp || schemaType(resolvedProp) !== 'object') continue;
+        const nested = findTokenPath(context, resolvedProp, depth + 1);
+        if (nested) return [key, ...nested];
+    }
+    return null;
+}
+
+/** The API's sign-in endpoint, if any: POST .../login (or /token, /session, ...) with a password, returning a token */
+function findLogin(context: TypeContext, models: Model[]): LoginInfo | null {
+    for (const model of models) {
+        for (const op of model.operations) {
+            if (op.method !== 'post' || !LOGIN_PATH.test(op.path) || !op.body || op.body.multipart) continue;
+            const fields = toFields(context, resolveObject(context, op.body.schema));
+            if (!fields || !fields.some(field => PASSWORD_FIELD.test(field.name))) continue;
+            const tokenPath = findTokenPath(context, op.returnSchema, 0);
+            if (tokenPath) return { model, op, fields, tokenPath };
+        }
+    }
+    return null;
 }
 

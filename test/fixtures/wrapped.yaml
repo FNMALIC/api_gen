@@ -1,6 +1,84 @@
 openapi: 3.0.3
 info: {title: Wrapped responses, version: "1.0"}
+security: [{bearerAuth: []}]
 paths:
+  /api/auth/login:
+    post:
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string}
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data:
+                    type: object
+                    properties:
+                      token: {type: string}
+                      user: {$ref: '#/components/schemas/User'}
+  /api/users/{id}/status:
+    post:
+      operationId: setUserStatus
+      summary: Set status
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: {type: string, enum: [active, suspended]}
+                reason: {type: string}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/UserEnvelope'}}}}
+  /api/users/{id}/reset-password:
+    post:
+      operationId: resetUserPassword
+      x-label: Reset password
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {success: {type: boolean}, message: {type: string}}}}}}
+  /api/roles:
+    get:
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/Role'}}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleCreate'}}}}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {type: object, properties: {success: {type: boolean}, data: {$ref: '#/components/schemas/Role'}}}}}}
+  /api/roles/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get:
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {success: {type: boolean}, data: {$ref: '#/components/schemas/Role'}}}}}}
+    patch:
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoleUpdate'}}}}
+      responses:
+        "200": {description: OK, content: {application/json: {schema: {type: object, properties: {success: {type: boolean}, data: {$ref: '#/components/schemas/Role'}}}}}}
   /api/users:
     get:
       operationId: listUsers
@@ -74,7 +152,27 @@ paths:
           description: An event that has its own "data" field, which is not an envelope
           content: {application/json: {schema: {$ref: '#/components/schemas/Event'}}}
 components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
   schemas:
+    RoleCreate:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        permissions: {type: array, items: {type: string, enum: [users.read, users.write, roles.write]}}
+    RoleUpdate:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+    Role:
+      type: object
+      properties:
+        id: {type: integer, readOnly: true}
+        name: {type: string}
+        description: {type: string}
+        permissions: {type: array, items: {type: string}}
     UserInput:
       type: object
       required: [name]

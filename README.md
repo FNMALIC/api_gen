@@ -7,9 +7,12 @@ A CLI that turns an OpenAPI document into a ready-to-use React data layer and ad
 - **API functions** (axios) with typed path, query and header parameters, request bodies and responses, with
   credentials applied from the document's `securitySchemes`
 - **React Query hooks** per resource: `useUsers`, `useUser`, `useCreateUser`, `useUpdateUser`, `useDeleteUser`
-- **CRUD dashboard** built with [shadcn/ui](https://ui.shadcn.com) for React Router or the Next.js App Router:
-  paginated, searchable, sortable tables (server-side when the API supports it), and forms validated with zod for
-  every kind of field: enums, lists, nested objects, JSON, dates and file uploads
+- **Back-office dashboard** built with [shadcn/ui](https://ui.shadcn.com) (Radix or Base UI) for React Router or the
+  Next.js App Router: paginated, searchable, sortable tables (server-side when the API supports it), create and edit
+  forms validated with zod for every kind of field, buttons for custom actions (set status, reset password, ...),
+  and a login page when the API has a sign-in endpoint
+- **Customizable**: title, colors, corner radius, font, dark mode, page size, English or French wording (or your
+  own), per-resource labels
 
 Works with OpenAPI 3.0, 3.1 and Swagger 2.0 (converted automatically), as YAML or JSON, from a file or a URL.
 
@@ -19,7 +22,8 @@ Works with OpenAPI 3.0, 3.1 and Swagger 2.0 (converted automatically), as YAML o
 npm install -g api-gen-package
 ```
 
-Requires Node.js 22.19 or newer.
+Requires Node.js 22.19 or newer. On an older Node you can still run it once with
+`npx -p node@22 -p api-gen-package generate-api <input> <output>`.
 
 ## Usage
 
@@ -39,6 +43,13 @@ generate-api [input] [output] [options]
 | `--group-by <mode>` | Group operations into resources by first path segment (`path`, default) or by first tag (`tag`) |
 | `--envelope <key>` / `--no-envelope` | Payload property of wrapped responses like `{ success, data }` (detected automatically by default), or never unwrap |
 | `--zod` | Generate zod schemas and validate JSON responses at runtime |
+| `--title <text>` | Dashboard title (default: the document's `info.title`) |
+| `--locale <locale>` | Dashboard language: `en` (default) or `fr` |
+| `--primary-color <color>` | Color of buttons and highlights, e.g. `"#2563eb"` |
+| `--radius <size>` | Corner radius, e.g. `0.25rem` (square) or `1rem` (round) |
+| `--page-size <rows>` | Rows per page (default 10) |
+| `--no-dark-mode` | Leave out the light/dark switch |
+| `--no-login` | Don't generate a login page, even if the API has a sign-in endpoint |
 | `--templates <module>` | JS module exporting template overrides (see below) |
 | `--no-clean` | Keep files from earlier runs that are no longer generated |
 | `--no-format` | Skip Prettier formatting (your project's Prettier config is used when present) |
@@ -66,7 +77,12 @@ file, and command-line flags override it:
   "output": "./src",
   "router": "next",
   "zod": true,
-  "prefix": "/api/v1"
+  "prefix": "/api/v1",
+  "ui": {
+    "title": "Back-office",
+    "locale": "fr",
+    "primaryColor": "#16a34a"
+  }
 }
 ```
 
@@ -83,8 +99,12 @@ detected from the HTTP method and path shape:
 | `PUT /users/{id}` (or `PATCH`) | update |
 | `DELETE /users/{id}` | delete |
 
-Other operations (e.g. `POST /orders/{id}/cancel`) are still generated as API functions. Hooks and pages are only
-generated for actions the API actually has, so a read-only resource gets a table without create, edit or delete.
+Item operations outside these, like `POST /users/{id}/status` or `POST /orders/{id}/cancel`, become buttons on each
+row (see [Row actions](#row-actions)); anything else is still generated as API functions. Hooks and pages are only
+generated for what the API actually has, so a read-only resource gets a table without create, edit or delete.
+
+The create form is built from the create request body and the edit form from the update request body, so an edit
+page only shows what `PUT`/`PATCH` accepts.
 
 ```
 src/
@@ -94,7 +114,7 @@ src/
   utils/api.ts               axios instance (created once, yours to edit)
   utils/auth.ts              credentials for the document's security schemes
   hooks/use<Resources>.ts    React Query hooks
-  components/api-gen/        inputs and helpers shared by the generated forms
+  components/api-gen/        forms, inputs, dialogs, theme and session helpers used by the dashboard
   pages/...                  React Router dashboard (or app/(dashboard)/... with --router next)
   .api-gen-manifest.json     what was generated, used to remove stale files on the next run
 ```
@@ -155,7 +175,7 @@ searches, sorts and paginates the returned rows in the browser.
 | `string` with `format: binary` | file picker (multipart endpoints get `FormData`) |
 | `integer`, `number` | number input |
 | `boolean` | checkbox |
-| `enum` | select |
+| `enum` | select (native, so it works the same everywhere) |
 | array of strings or numbers | list input (type, then Enter) |
 | array of enum values | checkbox group |
 | object with properties | nested fieldset (an optional one is only validated once something is filled in) |
@@ -178,18 +198,62 @@ automatically: an object with a `data`, `result` or `payload` property whose oth
 A resource that merely has its own `data` field next to `id` and `name` is not mistaken for an envelope. Use
 `--envelope result` to name the payload property explicitly, or `--no-envelope` to turn this off.
 
+### Row actions
+
+Item operations that aren't create, read, update or delete get a button on each row of the table:
+
+- without a request body (`POST /users/{id}/reset-password`): the button asks for confirmation, then calls the API;
+- with a body (`POST /users/{id}/status` taking `{ status, reason }`): the button opens a dialog with a form built
+  from the body schema.
+
+The button label comes from the operation's `x-label`, its `summary` (when short), or the last path segment. Each
+action also gets a hook, e.g. `useSetUserStatus()`.
+
+### Login page
+
+When the API has a sign-in endpoint (a `POST` to a path ending in `/login`, `/signin`, `/token`, `/session`, ...)
+whose body has a password field and whose response contains a token (`token`, `accessToken`, `access_token`,
+`jwt`, possibly nested or wrapped), the dashboard gets:
+
+- a login page (`/login`) with a form built from the endpoint's body;
+- token storage (`components/api-gen/session.ts`), sent as a bearer token with every secured request;
+- a redirect to the login page for signed-out visitors and when the API answers 401;
+- a sign-out button in the sidebar.
+
+Use `--no-login` to leave this out.
+
+### Customizing the dashboard
+
+Everything below goes under `"ui"` in the config file; the common ones also have command-line flags.
+
+| Option | Effect |
+| --- | --- |
+| `title` | Sidebar and login page title (default: the document's `info.title`) |
+| `locale` | `"en"` (default) or `"fr"` |
+| `labels` | Override any UI string, e.g. `{ "addNew": "New", "save": "Save changes" }` (see `Strings` in the package's types) |
+| `pageSize` | Rows per page (default 10) |
+| `primaryColor` | Shortcut for `theme.colors.primary`; the text drawn on it is made readable automatically |
+| `theme.colors` / `theme.darkColors` | Any shadcn/ui color token, e.g. `{ "primary": "#2563eb", "destructive": "#dc2626", "sidebar": "#f8fafc" }` |
+| `theme.radius` | Corner radius, e.g. `"0.25rem"` |
+| `theme.font` | Font family of the dashboard, e.g. `"Inter, sans-serif"` (load the font yourself) |
+| `darkModeToggle` | Light/dark switch in the sidebar (default `true`) |
+| `resources` | Per resource (by its name in the URL): `{ "users": { "label": "Utilisateurs", "singularLabel": "Utilisateur", "hidden": false } }` |
+
+Theme options are written to `components/api-gen/theme.css`, which the dashboard layout imports. Field and column
+labels come from your schema: use `x-label` (see below) to translate or rename them.
+
 ### Vendor extensions
 
 | Extension | Effect |
 | --- | --- |
-| `x-label: "Product name"` | Column and field label |
+| `x-label: "Product name"` | Column and field label; on an operation, the label of its row action button |
 | `x-hidden: true` / `"table"` / `"form"` | Hide everywhere, or only in the table or the form |
 | `x-order: 0` | Position in tables and forms (lower first) |
 
 ### Template overrides
 
 Pass a module whose default export maps file kinds (`listPage`, `createPage`, `editPage`, `form`, `layout`,
-`routes`, `hooks`, `api`) to functions returning new content, or `undefined` to keep the default:
+`routes`, `loginPage`, `hooks`, `api`) to functions returning new content, or `undefined` to keep the default:
 
 ```js
 // api-gen.templates.mjs
@@ -200,13 +264,15 @@ export default {
 
 ## Dashboard setup (shadcn/ui)
 
-The dashboard imports components from `@/components/ui/*`, so your app needs
-[shadcn/ui set up](https://ui.shadcn.com/docs/installation) with the `@` alias pointing at the output folder.
-Then add the components and libraries it uses:
+The dashboard imports a few components from `@/components/ui/*`, so your app needs
+[shadcn/ui set up](https://ui.shadcn.com/docs/installation) with the `@` alias pointing at the output folder. Both
+flavours work: Radix and Base UI. Forms, selects and dialogs are generated into `components/api-gen/`, so they don't
+depend on shadcn components that newer styles no longer ship. Then add the components and libraries it uses (the
+CLI prints these commands after generating):
 
 ```bash
-npx shadcn@latest add button card table form input textarea checkbox select alert-dialog sonner
-npm install @tanstack/react-query axios
+npx shadcn@latest add button card table input textarea checkbox sonner
+npm install axios @tanstack/react-query react-hook-form zod @hookform/resolvers sonner
 npm install react-router-dom   # only for --router react-router
 ```
 
