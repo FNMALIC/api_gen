@@ -30,12 +30,13 @@ languages, a mock API and a `create` command. Also includes the unreleased 2.2.0
   `ui.translations` translates your own labels.
 - Custom input components per field (`component: "@/components/ColorPicker"`).
 - `generate-api mock`: a mock API with fake data shaped like the document's responses, paging, filters, validation
-  and sign-in.
+  and sign-in. Images are drawn locally, so they show without a network connection.
 - `generate-api create <dir> [input]`: a new Vite + React + Tailwind + shadcn/ui app with the dashboard generated, a
   design file, and a dev server proxying to the mock or to `API_URL`.
 - `--watch` also regenerates when the design file changes.
 - `x-widget` and `x-cell` schema extensions.
 - `examples/bookstore`: an API and design file to try all of this.
+- Screenshots of the bookstore example in the README.
 - `generate()` returns the npm packages the dashboard needs (`dependencies`), which the CLI prints.
 
 ### Changed

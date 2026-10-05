@@ -48,6 +48,14 @@ const WORDS = ['alpha', 'bravo', 'cedar', 'delta', 'ember', 'fjord', 'glade', 'h
 
 const pick = <T>(items: readonly T[], rand: () => number): T => items[Math.floor(rand() * items.length) % items.length];
 
+// A small colored image with a letter, as a data URL, so it shows without a network connection
+function placeholderImage(index: number, rand: () => number): string {
+    const hue = Math.floor(rand() * 360);
+    const letter = String.fromCharCode(65 + (index % 26));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="hsl(${hue} 65% 55%)"/><text x="40" y="52" font-family="sans-serif" font-size="34" font-weight="600" fill="white" text-anchor="middle">${letter}</text></svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 /** A plausible value for a field, from its type, format and name */
 export function fakeValue(field: Field, index: number, rand: () => number, owner?: string): unknown {
     const name = field.name;
@@ -60,6 +68,7 @@ export function fakeValue(field: Field, index: number, rand: () => number, owner
             if (/(^|_)id$|Id$/.test(name) || name === 'id') return index;
             if (/price|amount|cost|total|balance|fee|salary/i.test(name)) return Math.round(rand() * 50000) / 100;
             if (/age$/i.test(name)) return 18 + Math.floor(rand() * 60);
+            if (/(rating|stars|score)$/i.test(name)) return 1 + Math.floor(rand() * 5);
             if (/year/i.test(name)) return 2000 + Math.floor(rand() * 26);
             if (/(count|quantity|stock|qty)/i.test(name)) return Math.floor(rand() * 200);
             return field.type === 'integer' ? Math.floor(rand() * 100) : Math.round(rand() * 10000) / 100;
@@ -89,7 +98,7 @@ export function fakeValue(field: Field, index: number, rand: () => number, owner
         const hex = () => Math.floor(rand() * 0x10000).toString(16).padStart(4, '0');
         return `${hex()}${hex()}-${hex()}-4${hex().slice(1)}-a${hex().slice(1)}-${hex()}${hex()}${hex()}`;
     }
-    if (/(image|avatar|photo|picture|logo|thumbnail|cover|banner)/i.test(name)) return `https://picsum.photos/seed/${name}${index}/200`;
+    if (/(image|avatar|photo|picture|logo|thumbnail|cover|banner)/i.test(name)) return placeholderImage(index, rand);
     if (field.format === 'uri' || field.format === 'url' || /(url|link|website)$/i.test(name)) return `https://example.com/${name.toLowerCase()}/${index}`;
     if (field.format === 'password' || /^(password|pass|pwd|secret)$/i.test(name)) return 'secret';
     if (field.format === 'binary') return null;

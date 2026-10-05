@@ -26,6 +26,22 @@ A CLI that turns an OpenAPI document into a ready-to-use React data layer and ad
 
 Works with OpenAPI 3.0, 3.1 and Swagger 2.0 (converted automatically), as YAML or JSON, from a file or a URL.
 
+## Screenshots
+
+The [bookstore example](examples/README.md), generated from its OpenAPI document and design file and running
+against `generate-api mock`.
+
+| | |
+| --- | --- |
+| ![Books list with filters, row selection, badges, amounts and row actions](https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/screenshots/3-books.png) | ![A book's detail page with a Reviews tab](https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/screenshots/4-book.png) |
+| **List**: search, filters, sortable columns, author names instead of ids, amounts in euros, bulk delete, CSV export | **Detail**: every field, Edit and Delete, related lists in tabs |
+| ![Create form showing validation messages](https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/screenshots/5-create.png) | ![Books list in dark mode, in French](https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/screenshots/6-books-dark-fr.png) |
+| **Form**: author picked from the authors, validation in the browser and from the server | **Dark mode and languages**: switched from the sidebar |
+| ![Home page with the number of books, authors and orders](https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/screenshots/2-home.png) | ![Sign-in page](https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/screenshots/1-login.png) |
+| **Home**: the number of records of each resource | **Sign-in**: with refresh tokens, permissions and sign-out on the server |
+
+<p align="center"><img src="https://raw.githubusercontent.com/FNMALIC/api_gen/main/docs/screenshots/7-phone-menu.png" alt="The sidebar opened from the menu button on a phone" width="260"><br><b>Phones</b>: the sidebar opens from a menu button</p>
+
 ## Quick start
 
 ```bash
