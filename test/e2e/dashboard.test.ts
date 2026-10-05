@@ -105,7 +105,12 @@ export default defineConfig({
             2
         )
     );
-    writeFile('src/index.css', '@import "tailwindcss";\n');
+    // Like shadcn's own index.css: it defines the color tokens too, and is imported after the dashboard,
+    // so a theme override has to win on specificity, not file order
+    writeFile(
+        'src/index.css',
+        '@import "tailwindcss";\n:root {\n    --primary: oklch(0.205 0 0);\n}\n.dark {\n    --primary: oklch(0.922 0 0);\n}\n'
+    );
     if (useShadcnInit) return; // shadcn init writes components.json itself
     writeFile(
         'components.json',

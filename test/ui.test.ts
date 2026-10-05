@@ -32,11 +32,13 @@ test('fills placeholders', () => {
 test('writes theme CSS with readable text on the primary color', () => {
     assert.equal(generateThemeCss({}), null);
     const css = generateThemeCss({ colors: { primary: '#facc15', destructive: 'oklch(0.58 0.22 27)' }, radius: '0.25rem', font: 'Inter, sans-serif' })!;
-    assert.match(css, /:root \{[^}]*--primary: #facc15;/);
+    // More specific than shadcn's own :root/.dark, so the order of the CSS files doesn't matter
+    assert.match(css, /:root:not\(\.dark\) \{[^}]*--primary: #facc15;/);
     assert.match(css, /--primary-foreground: #0a0a0a;/, 'dark text on a light yellow');
     assert.match(css, /--destructive: oklch\(0\.58 0\.22 27\);/);
     assert.match(css, /--radius: 0\.25rem;/);
-    assert.match(css, /\.dark \{[^}]*--primary: #facc15;/, 'the primary color carries over to dark mode');
+    assert.match(css, /:root\.dark \{[^}]*--primary: #facc15;/, 'the primary color carries over to dark mode');
+    assert.doesNotMatch(css.slice(css.indexOf(':root.dark')), /destructive/, 'light-only colors stay out of dark mode');
     assert.match(css, /font-family: Inter, sans-serif;/);
     assert.match(generateThemeCss({ colors: { primary: '#1e3a8a' } })!, /--primary-foreground: #fafafa;/, 'light text on dark blue');
 });
