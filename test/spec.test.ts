@@ -138,7 +138,7 @@ test('unwraps { success, data } envelopes and finds nested totals', async () => 
     assert.deepEqual(events.columns.map(f => f.name), ['id', 'name', 'data']);
 
     // Fields come from the payload, not the envelope
-    assert.deepEqual(users.columns.map(f => f.name), ['name', 'nickname', 'active', 'id']);
+    assert.deepEqual(users.columns.map(f => f.name), ['name', 'nickname', 'roleId', 'active', 'id']);
     assert.deepEqual(users.listCapabilities!.totalPath, ['meta', 'total']);
     assert.equal(users.listCapabilities!.serverPaging, true);
 });

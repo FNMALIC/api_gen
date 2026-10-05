@@ -54,6 +54,8 @@ export interface GenerateResult {
     removed: string[];
     skipped: string[];
     warnings: string[];
+    /** npm packages the generated dashboard imports */
+    dependencies: string[];
 }
 
 async function formatFile(filePath: string, content: string): Promise<string> {
@@ -154,6 +156,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
     const baseUrl = options.baseUrl ?? serverUrl(api) ?? '/';
     const files: FileMap = {};
+    let dependencies: string[] = [];
     const warnings = [...designed.warnings, ...skipped.map(operation => `Skipped ${operation}: no resource segment after the prefix.`)];
     const addPerModel = (kind: TemplateKind, generated: FileMap) => {
         for (const [file, content] of Object.entries(generated)) {
@@ -187,6 +190,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
         const dashboard = generateCRUDDashboard(models, { router, templates, ui, login, bearerSchemes });
         Object.assign(files, dashboard.files);
         warnings.push(...dashboard.warnings);
+        dependencies = dashboard.dependencies;
     }
 
     const written: string[] = [];
@@ -212,32 +216,66 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
         JSON.stringify({ generator: 'api-gen-package', files: [...manifestFiles].sort() }, null, 2) + '\n'
     );
 
-    return { written, removed, skipped, warnings };
+    return { written, removed, skipped, warnings, dependencies };
 }
 
 /**
- * Generate once, then again whenever the input file changes. Returns a function that stops watching.
+ * Generate once, then again whenever the input file (or the design file) changes. Returns a function that stops watching.
+ * reload: called when the design file changes, to read the options again.
  */
 export function watch(
     options: GenerateOptions,
-    { onResult = () => {}, onError = () => {} }: { onResult?: (result: GenerateResult) => void; onError?: (error: Error) => void } = {}
+    {
+        onResult = () => {},
+        onError = () => {},
+        configFile,
+        reload,
+    }: {
+        onResult?: (result: GenerateResult) => void;
+        onError?: (error: Error) => void;
+        /** The design file (api-gen.config.yaml) to watch too */
+        configFile?: string;
+        reload?: () => Promise<GenerateOptions>;
+    } = {}
 ): () => void {
     if (/^https?:\/\//i.test(options.input)) {
         throw new Error('--watch needs a local file, not a URL.');
     }
 
+    let current = options;
     let running: Promise<void> = Promise.resolve();
-    const run = () => {
-        running = running.then(() => generate(options).then(onResult, onError));
+    const run = (reloadOptions = false) => {
+        running = running.then(async () => {
+            try {
+                if (reloadOptions && reload) {
+                    const next = await reload();
+                    if (next.input !== current.input) {
+                        fs.unwatchFile(current.input, listener);
+                        fs.watchFile(next.input, { interval: 300 }, listener);
+                    }
+                    current = next;
+                }
+                onResult(await generate(current));
+            } catch (error) {
+                onError(error as Error);
+            }
+        });
         return running;
     };
 
     run();
     // Polling survives editors that save by replacing the file, which breaks fs.watch
-    const listener = (current: fs.Stats, previous: fs.Stats) => {
-        if (current.mtimeMs !== previous.mtimeMs) run();
+    const listener = (now: fs.Stats, previous: fs.Stats) => {
+        if (now.mtimeMs !== previous.mtimeMs) run();
+    };
+    const configListener = (now: fs.Stats, previous: fs.Stats) => {
+        if (now.mtimeMs !== previous.mtimeMs) run(true);
     };
     fs.watchFile(options.input, { interval: 300 }, listener);
+    if (configFile) fs.watchFile(configFile, { interval: 300 }, configListener);
 
-    return () => fs.unwatchFile(options.input, listener);
+    return () => {
+        fs.unwatchFile(current.input, listener);
+        if (configFile) fs.unwatchFile(configFile, configListener);
+    };
 }

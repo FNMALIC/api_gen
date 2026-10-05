@@ -1,9 +1,12 @@
 import SwaggerParser from '@apidevtools/swagger-parser';
-import { camelCase, pascalCase, kebabCase, safeIdentifier, humanize, singularize, pluralize } from './helpers.ts';
+import { camelCase, pascalCase, kebabCase, safeIdentifier, humanize, singularize, pluralize, words } from './helpers.ts';
 import { HTTP_METHODS } from './model.ts';
 import type {
     Action,
     CrudAction,
+    Filter,
+    Reference,
+    SubResource,
     LoginInfo,
     Field,
     HttpMethod,
@@ -214,6 +217,7 @@ function buildOperation(api: OpenAPIDocument, context: TypeContext, entry: Entry
         envelope: detected ? { key: unwrapped ? detected.key : null } : null,
         returnSchema: unwrapped?.schema ?? responseSchema,
         xLabel: operation['x-label'],
+        permissions: permissionList(operation['x-permissions'] ?? operation['x-permission']),
         crud: null,
         functionName: '',
     };
@@ -273,12 +277,12 @@ function functionNameFor(op: Operation, model: Model): string {
 }
 
 // Resolve an object-like schema into { properties, required }, following $refs, allOf and arrays
-interface ResolvedObject {
+export interface ResolvedObject {
     properties: Record<string, SchemaObject>;
     required: string[];
 }
 
-function resolveObject(
+export function resolveObject(
     context: TypeContext,
     rawSchema: SchemaObject | null | undefined,
     { unwrapList = false }: { unwrapList?: boolean } = {}
@@ -359,7 +363,7 @@ function detectEnvelope(
     return { key, schema: key ? resolved.properties[key] : null };
 }
 
-function schemaType(prop: SchemaObject): string {
+export function schemaType(prop: SchemaObject): string {
     let type = Array.isArray(prop.type) ? prop.type.find(t => t !== 'null') : prop.type;
     if (!type && (prop.properties || prop.allOf || prop.additionalProperties)) type = 'object';
     if (!type && prop.enum) type = 'string';
@@ -371,7 +375,7 @@ function hiddenFlags(prop: SchemaObject): Field['hidden'] {
     return { table: value === true || value === 'table', form: value === true || value === 'form' };
 }
 
-function toFields(context: TypeContext, resolved: ResolvedObject | null, depth = 0): Field[] | null {
+export function toFields(context: TypeContext, resolved: ResolvedObject | null, depth = 0): Field[] | null {
     if (!resolved) return null;
     const fields = Object.entries(resolved.properties).map(([name, rawProp], index) => {
         const prop: SchemaObject = context.deref(rawProp) || {};
@@ -392,6 +396,9 @@ function toFields(context: TypeContext, resolved: ResolvedObject | null, depth =
             required: resolved.required.includes(name),
             description: base.description,
         };
+        // x-widget: textarea, x-cell: badge (same values as in the design file)
+        if (typeof base['x-widget'] === 'string') field.widget = base['x-widget'];
+        if (typeof base['x-cell'] === 'string') field.cell = base['x-cell'] as Field['cell'];
         if (type === 'array') {
             const items: SchemaObject = context.deref(base.items) || {};
             field.items = { type: schemaType(items), format: items.format, enum: items.enum, isObject: !!resolveObject(context, items) };
@@ -417,7 +424,7 @@ function firstFields(context: TypeContext, candidates: Candidate[]): Field[] {
     return [];
 }
 
-const PARAM_NAMES: Record<'page' | 'offset' | 'size' | 'search' | 'sort' | 'direction', string[]> = {
+export const PARAM_NAMES: Record<'page' | 'offset' | 'size' | 'search' | 'sort' | 'direction', string[]> = {
     page: ['page', 'pagenumber', 'page_number', 'pageindex', 'page_index'],
     offset: ['offset', 'skip', 'start'],
     size: ['limit', 'pagesize', 'page_size', 'perpage', 'per_page', 'size', 'take'],
@@ -435,7 +442,7 @@ function directionValues(context: TypeContext, param: Param): { name: string; as
     };
 }
 
-const TOTAL_NAMES = ['total', 'totalcount', 'total_count', 'count', 'totalitems', 'total_items', 'totalelements', 'totalresults'];
+export const TOTAL_NAMES = ['total', 'totalcount', 'total_count', 'count', 'totalitems', 'total_items', 'totalelements', 'totalresults'];
 
 // Which pagination/search/sort query parameters the list endpoint understands, and where the total lives
 function listCapabilities(context: TypeContext, list: Operation | undefined): ListCapabilities | null {
@@ -539,6 +546,10 @@ export function buildModels(
             editFields: [],
             columns: [],
             actions: [],
+            idKey: 'id',
+            filters: [],
+            permissions: { actions: {} },
+            subResources: [],
             listCapabilities: null,
         };
         // Uncountable names (health, data) would otherwise give identical singular and plural identifiers
@@ -580,6 +591,7 @@ export function buildModels(
             [retrieve && retrieve.returnSchema],
         ]);
         model.actions = findActions(context, model);
+        model.subResources = findSubResources(context, model);
         model.columns = firstFields(context, [
             [list && list.returnSchema, { unwrapList: true }],
             [retrieve && retrieve.returnSchema],
@@ -587,10 +599,115 @@ export function buildModels(
         ]);
         model.listCapabilities = listCapabilities(context, list);
 
+        // The row property holding the id: the item path parameter when the rows have it, else "id"
+        const idParam = (retrieve || update || model.crud.delete || model.actions[0]?.op)?.pathParams[0];
+        model.idKey = idParam && model.columns.some(column => column.name === idParam.name) ? idParam.name : 'id';
+
+        const permissionOf = (op: Operation | undefined) => (op?.permissions?.length ? op.permissions : undefined);
+        model.permissions = {
+            list: permissionOf(list),
+            view: permissionOf(retrieve),
+            create: permissionOf(create),
+            update: permissionOf(update),
+            delete: permissionOf(model.crud.delete),
+            actions: Object.fromEntries(model.actions.filter(action => permissionOf(action.op)).map(action => [action.Name, action.op.permissions!])),
+        };
+
         models.push(model);
     }
 
+    linkReferences(models);
+    for (const model of models) model.filters = listFilters(context, model, models);
+
     return { models, skipped, login: findLogin(context, models) };
+}
+
+function permissionList(value: unknown): string[] | undefined {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string');
+    return undefined;
+}
+
+const normalize = (value: string) => words(value).join('').toLowerCase();
+
+// Names a foreign key can point at: roleId -> roles, categoryId -> product-categories (as productCategoryId), ...
+function referenceTarget(name: string, models: Model[]): { model: Model; many: boolean; base: string } | null {
+    const many = name.match(/^(.+?)(?:Ids|_ids|IDs)$/);
+    const single = many ? null : name.match(/^(.+?)(?:Id|_id|ID)$/);
+    const base = (many ?? single)?.[1];
+    if (!base) return null;
+    const wanted = [normalize(base), normalize(singularize(base)), normalize(pluralize(base))];
+    // Lists that need nothing else to be called can fill a select
+    const candidates = models.filter(candidate => candidate.crud.list && candidate.crud.list.queryParams.every(param => !param.required));
+    const names = (candidate: Model) => [candidate.key, candidate.Singular, candidate.Plural].map(normalize);
+    // categoryId -> categories, else the one resource ending that way: product-categories
+    const exact = candidates.find(candidate => names(candidate).some(name => wanted.includes(name)));
+    const suffixed = candidates.filter(candidate => names(candidate).some(name => wanted.some(word => name.endsWith(word))));
+    const model = exact ?? (suffixed.length === 1 ? suffixed[0] : undefined);
+    return model ? { model, many: !!many, base } : null;
+}
+
+const DISPLAY_NAMES = ['name', 'title', 'label', 'displayName', 'display_name', 'fullName', 'full_name', 'username', 'email', 'code', 'slug'];
+
+export function referenceTo(model: Model, many: boolean, display?: string): Reference {
+    const columnNames = model.columns.map(column => column.name);
+    return {
+        resource: model.key,
+        idKey: model.idKey,
+        display: display ?? DISPLAY_NAMES.find(name => columnNames.includes(name)) ?? model.idKey,
+        many,
+    };
+}
+
+function isReferenceShaped(field: Field, many: boolean): boolean {
+    if (field.enum && field.enum.length > 0) return false;
+    if (many) return field.type === 'array' && !!field.items && ['integer', 'number', 'string'].includes(field.items.type) && !field.items.enum;
+    return ['integer', 'number', 'string'].includes(field.type);
+}
+
+/** Mark foreign-key fields (roleId, tagIds) with the resource they point at */
+function linkReferences(models: Model[]): void {
+    for (const model of models) {
+        const lists = [model.formFields, model.editFields, model.columns, ...model.actions.map(action => action.fields ?? [])];
+        for (const field of lists.flat()) {
+            if (field.reference) continue;
+            const target = referenceTarget(field.name, models);
+            // productId on products is the record's own id, not a link
+            if (target && target.model === model && field.name === model.idKey) continue;
+            if (!target || !isReferenceShaped(field, target.many)) continue;
+            field.reference = referenceTo(target.model, target.many);
+            // "Category" rather than "Category Id", unless the schema names it (x-label)
+            if (field.label === humanize(field.name)) field.label = humanize(target.many ? pluralize(target.base) : target.base);
+        }
+    }
+}
+
+const FILTER_SKIP = new Set([...Object.values(PARAM_NAMES).flat()]);
+
+/** List query parameters other than paging, search and sort become filters above the table */
+function listFilters(context: TypeContext, model: Model, models: Model[]): Filter[] {
+    const list = model.crud.list;
+    if (!list) return [];
+    const filters: Filter[] = [];
+    for (const param of list.queryParams) {
+        if (param.required || FILTER_SKIP.has(param.name.toLowerCase())) continue;
+        const schema = context.deref(param.schema) || {};
+        const type = schemaType(schema);
+        const label = typeof schema['x-label'] === 'string' ? schema['x-label'] : humanize(param.name);
+        const target = referenceTarget(param.name, models);
+        if (target && !target.many && ['integer', 'number', 'string'].includes(type)) {
+            filters.push({ name: param.name, label: typeof schema['x-label'] === 'string' ? label : humanize(target.base), kind: 'reference', reference: referenceTo(target.model, false) });
+        } else if (schema.enum && schema.enum.length > 0) {
+            filters.push({ name: param.name, label, kind: 'enum', options: schema.enum.filter(value => value !== null) });
+        } else if (type === 'boolean') {
+            filters.push({ name: param.name, label, kind: 'boolean' });
+        } else if (type === 'integer' || type === 'number') {
+            filters.push({ name: param.name, label, kind: 'number' });
+        } else if (type === 'string') {
+            filters.push({ name: param.name, label, kind: schema.format === 'date' || schema.format === 'date-time' ? 'date' : 'text' });
+        }
+    }
+    return filters;
 }
 
 /**
@@ -617,29 +734,72 @@ function findActions(context: TypeContext, model: Model): Action[] {
     return actions;
 }
 
+/** GET <collection>/{id}/<name> returning a list: shown as a tab on the record's detail page */
+function findSubResources(context: TypeContext, model: Model): SubResource[] {
+    const escaped = model.basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^${escaped}/\\{[^}/]+\\}/([^/{}]+)$`);
+    const subResources: SubResource[] = [];
+    for (const op of model.operations) {
+        const match = op.path.match(pattern);
+        if (!match || op.method !== 'get' || op.crud || op.pathParams.length !== 1) continue;
+        if ([...op.queryParams, ...op.headerParams].some(param => param.required)) continue;
+        const raw = context.deref(op.returnSchema);
+        if (!raw) continue;
+        const isList = schemaType(raw) === 'array' || (raw.properties && findListItems(context, raw, 0));
+        if (!isList) continue;
+        const columns = firstFields(context, [[op.returnSchema, { unwrapList: true }]]);
+        if (columns.length === 0) continue;
+        const label = (typeof op.xLabel === 'string' && op.xLabel) || humanize(match[1]);
+        subResources.push({ op, label, Name: pascalCase(op.functionName), columns });
+    }
+    return subResources;
+}
+
 const LOGIN_PATH = /\/(login|log-in|signin|sign-in|sign_in|authenticate|token|tokens|session|sessions)$/i;
 const PASSWORD_FIELD = /^(password|pass|passwd|pwd|secret)$/i;
-const TOKEN_NAMES = ['accessToken', 'access_token', 'token', 'jwt', 'idToken', 'id_token', 'authToken', 'auth_token'];
+export const TOKEN_NAMES = ['accessToken', 'access_token', 'token', 'jwt', 'idToken', 'id_token', 'authToken', 'auth_token'];
 
-// Where the token is in a sign-in response: { token }, { accessToken }, { data: { token } }, { tokens: { accessToken } }
-function findTokenPath(context: TypeContext, schema: SchemaObject | null | undefined, depth: number): string[] | null {
-    const raw = context.deref(schema);
-    if (!raw) return null;
-    const resolved = resolveObject(context, raw);
-    if (!resolved) return null;
-    for (const name of TOKEN_NAMES) {
-        const prop = context.deref(resolved.properties[name]);
-        if (prop && schemaType(prop) === 'string') return [name];
-    }
-    if (depth >= 1) return null;
-    for (const [key, prop] of Object.entries(resolved.properties)) {
-        const resolvedProp = context.deref(prop);
-        if (!resolvedProp || schemaType(resolvedProp) !== 'object') continue;
-        const nested = findTokenPath(context, resolvedProp, depth + 1);
-        if (nested) return [key, ...nested];
+/**
+ * Where a property is in a response, breadth first: { token }, { data: { token } }, { data: { user: { email } } }.
+ * Names are tried in order at each level; maxDepth counts the objects to go through.
+ */
+function findPropertyPath(
+    context: TypeContext,
+    schema: SchemaObject | null | undefined,
+    names: string[],
+    accept: (prop: SchemaObject) => boolean,
+    maxDepth: number
+): string[] | null {
+    let level: Array<{ path: string[]; schema: SchemaObject | null | undefined }> = [{ path: [], schema }];
+    for (let depth = 0; depth <= maxDepth && level.length > 0; depth++) {
+        const next: typeof level = [];
+        for (const entry of level) {
+            const raw = context.deref(entry.schema);
+            if (!raw || schemaType(raw) === 'array') continue;
+            const resolved = resolveObject(context, raw);
+            if (!resolved) continue;
+            for (const name of names) {
+                const prop = context.deref(resolved.properties[name]);
+                if (prop && accept(prop)) return [...entry.path, name];
+            }
+            for (const [key, prop] of Object.entries(resolved.properties)) {
+                const resolvedProp = context.deref(prop);
+                if (resolvedProp && (schemaType(resolvedProp) === 'object' || resolvedProp.allOf)) next.push({ path: [...entry.path, key], schema: resolvedProp });
+            }
+        }
+        level = next;
     }
     return null;
 }
+
+const isString = (prop: SchemaObject) => schemaType(prop) === 'string';
+const findTokenPath = (context: TypeContext, schema: SchemaObject | null | undefined) => findPropertyPath(context, schema, TOKEN_NAMES, isString, 1);
+
+const PERMISSION_NAMES = ['permissions', 'scopes', 'authorities', 'roles'];
+const USER_NAMES = ['name', 'fullName', 'full_name', 'displayName', 'display_name', 'username', 'email'];
+const REFRESH_TOKEN_NAMES = ['refreshToken', 'refresh_token'];
+const LOGOUT_PATH = /\/(logout|log-out|log_out|signout|sign-out|sign_out|logoff)$/i;
+const REFRESH_PATH = /\/(refresh|refresh-token|refresh_token|refreshtoken|token\/refresh)$/i;
 
 /** The API's sign-in endpoint, if any: POST .../login (or /token, /session, ...) with a password, returning a token */
 function findLogin(context: TypeContext, models: Model[]): LoginInfo | null {
@@ -648,8 +808,52 @@ function findLogin(context: TypeContext, models: Model[]): LoginInfo | null {
             if (op.method !== 'post' || !LOGIN_PATH.test(op.path) || !op.body || op.body.multipart) continue;
             const fields = toFields(context, resolveObject(context, op.body.schema));
             if (!fields || !fields.some(field => PASSWORD_FIELD.test(field.name))) continue;
-            const tokenPath = findTokenPath(context, op.returnSchema, 0);
-            if (tokenPath) return { model, op, fields, tokenPath };
+            const tokenPath = findTokenPath(context, op.returnSchema);
+            if (!tokenPath) continue;
+            return {
+                model,
+                op,
+                fields,
+                tokenPath,
+                permissionsPath: findPropertyPath(context, op.returnSchema, PERMISSION_NAMES, prop => schemaType(prop) === 'array', 2),
+                userNamePath: findPropertyPath(context, op.returnSchema, USER_NAMES, isString, 2),
+                refreshTokenPath: findPropertyPath(context, op.returnSchema, REFRESH_TOKEN_NAMES, isString, 2),
+                logout: findLogout(models),
+                refresh: findRefresh(context, models),
+            };
+        }
+    }
+    return null;
+}
+
+// POST .../logout, without anything to fill in
+function findLogout(models: Model[]): LoginInfo['logout'] {
+    for (const model of models) {
+        for (const op of model.operations) {
+            if (!['post', 'delete', 'get'].includes(op.method) || !LOGOUT_PATH.test(op.path) || op.pathParams.length > 0) continue;
+            if ((op.body && op.body.required) || op.queryParams.some(param => param.required)) continue;
+            return { model, op };
+        }
+    }
+    return null;
+}
+
+// POST .../refresh taking { refreshToken } and returning a new access token
+function findRefresh(context: TypeContext, models: Model[]): LoginInfo['refresh'] {
+    for (const model of models) {
+        for (const op of model.operations) {
+            if (op.method !== 'post' || !REFRESH_PATH.test(op.path) || !op.body || op.body.multipart || op.pathParams.length > 0) continue;
+            const fields = toFields(context, resolveObject(context, op.body.schema));
+            const field = fields?.find(candidate => /^refresh_?token$/i.test(candidate.name));
+            const tokenPath = findTokenPath(context, op.returnSchema);
+            if (!field || !tokenPath) continue;
+            return {
+                model,
+                op,
+                field: field.name,
+                tokenPath,
+                refreshTokenPath: findPropertyPath(context, op.returnSchema, REFRESH_TOKEN_NAMES, isString, 2),
+            };
         }
     }
     return null;

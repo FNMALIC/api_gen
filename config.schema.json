@@ -6,29 +6,85 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string" },
-    "input": { "type": "string", "description": "OpenAPI 3 or Swagger 2 document: path (relative to this file) or URL" },
-    "output": { "type": "string", "description": "Output directory, relative to this file (default ./src)" },
+    "$schema": {
+      "type": "string"
+    },
+    "input": {
+      "type": "string",
+      "description": "OpenAPI 3 or Swagger 2 document: path (relative to this file) or URL"
+    },
+    "output": {
+      "type": "string",
+      "description": "Output directory, relative to this file (default ./src)"
+    },
     "only": {
       "type": "array",
-      "items": { "enum": ["api", "hooks", "dashboard"] },
+      "items": {
+        "enum": [
+          "api",
+          "hooks",
+          "dashboard"
+        ]
+      },
       "uniqueItems": true,
       "description": "Generate only some parts"
     },
-    "router": { "enum": ["react-router", "next"], "description": "Dashboard routing (default react-router)" },
-    "baseUrl": { "type": "string", "description": "axios baseURL when utils/api.ts is first created" },
-    "prefix": { "type": "string", "description": "Path prefix before the resource name, e.g. /api/v1" },
-    "groupBy": { "enum": ["path", "tag"], "description": "Group operations by first path segment or by first tag" },
+    "router": {
+      "enum": [
+        "react-router",
+        "next"
+      ],
+      "description": "Dashboard routing (default react-router)"
+    },
+    "baseUrl": {
+      "type": "string",
+      "description": "axios baseURL when utils/api.ts is first created"
+    },
+    "prefix": {
+      "type": "string",
+      "description": "Path prefix before the resource name, e.g. /api/v1"
+    },
+    "groupBy": {
+      "enum": [
+        "path",
+        "tag"
+      ],
+      "description": "Group operations by first path segment or by first tag"
+    },
     "envelope": {
-      "oneOf": [{ "type": "string" }, { "const": false }],
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "const": false
+        }
+      ],
       "description": "Payload property of wrapped responses like { success, data }, or false to never unwrap"
     },
-    "zod": { "type": "boolean", "description": "Validate JSON responses at runtime with generated zod schemas" },
-    "login": { "type": "boolean", "description": "Generate a login page when the API has a sign-in endpoint (default true)" },
-    "templates": { "type": "string", "description": "JS module exporting template overrides" },
-    "clean": { "type": "boolean", "description": "Delete files from earlier runs that are no longer generated (default true)" },
-    "format": { "type": "boolean", "description": "Format output with Prettier (default true)" },
-    "ui": { "$ref": "#/definitions/ui" }
+    "zod": {
+      "type": "boolean",
+      "description": "Validate JSON responses at runtime with generated zod schemas"
+    },
+    "login": {
+      "type": "boolean",
+      "description": "Generate a login page when the API has a sign-in endpoint (default true)"
+    },
+    "templates": {
+      "type": "string",
+      "description": "JS module exporting template overrides"
+    },
+    "clean": {
+      "type": "boolean",
+      "description": "Delete files from earlier runs that are no longer generated (default true)"
+    },
+    "format": {
+      "type": "boolean",
+      "description": "Format output with Prettier (default true)"
+    },
+    "ui": {
+      "$ref": "#/definitions/ui"
+    }
   },
   "definitions": {
     "ui": {
@@ -36,42 +92,116 @@
       "additionalProperties": false,
       "description": "Look and wording of the back-office",
       "properties": {
-        "title": { "type": "string", "description": "Sidebar and login page title (default: the document's info.title)" },
-        "locale": { "enum": ["en", "fr"], "description": "Built-in wording (default en)" },
+        "title": {
+          "type": "string",
+          "description": "Sidebar and login page title (default: the document's info.title)"
+        },
+        "locale": {
+          "enum": [
+            "en",
+            "fr",
+            "es",
+            "de",
+            "pt",
+            "it"
+          ],
+          "description": "Built-in wording (default en)"
+        },
+        "locales": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "en",
+              "fr",
+              "es",
+              "de",
+              "pt",
+              "it"
+            ]
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "description": "Languages people can switch between in the sidebar; the first (or \"locale\") is the default"
+        },
+        "translations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "description": "Your labels in each language, e.g. { en: { Utilisateurs: Users } }"
+        },
         "labels": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Override any UI string, e.g. addNew, save, signIn"
         },
-        "pageSize": { "type": "integer", "minimum": 1, "description": "Rows per page (default 10)" },
-        "primaryColor": { "type": "string", "description": "Color of buttons and highlights, e.g. \"#2563eb\"" },
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Rows per page (default 10)"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{3}$",
+          "description": "Currency of amount columns (price, total, ...), e.g. EUR (default USD)"
+        },
+        "home": {
+          "type": "boolean",
+          "description": "Home page with the number of records of every resource (default true)"
+        },
+        "primaryColor": {
+          "type": "string",
+          "description": "Color of buttons and highlights, e.g. \"#2563eb\""
+        },
         "theme": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "colors": {
               "type": "object",
-              "additionalProperties": { "type": "string" },
+              "additionalProperties": {
+                "type": "string"
+              },
               "description": "shadcn/ui color tokens for light mode: primary, secondary, accent, destructive, background, foreground, muted, border, sidebar, ..."
             },
             "darkColors": {
               "type": "object",
-              "additionalProperties": { "type": "string" },
+              "additionalProperties": {
+                "type": "string"
+              },
               "description": "The same tokens for dark mode"
             },
-            "radius": { "type": "string", "description": "Corner radius, e.g. 0.25rem (square) or 1rem (round)" },
-            "font": { "type": "string", "description": "CSS font-family of the dashboard" }
+            "radius": {
+              "type": "string",
+              "description": "Corner radius, e.g. 0.25rem (square) or 1rem (round)"
+            },
+            "font": {
+              "type": "string",
+              "description": "CSS font-family of the dashboard"
+            }
           }
         },
-        "darkModeToggle": { "type": "boolean", "description": "Light/dark switch in the sidebar (default true)" },
+        "darkModeToggle": {
+          "type": "boolean",
+          "description": "Light/dark switch in the sidebar (default true)"
+        },
         "nav": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Sidebar order, by resource name; resources not listed follow"
         },
         "resources": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/definitions/resource" },
+          "additionalProperties": {
+            "$ref": "#/definitions/resource"
+          },
           "description": "Per resource, by its name in the URL (users, product-categories)"
         }
       }
@@ -80,23 +210,63 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "label": { "type": "string", "description": "Plural label, e.g. Utilisateurs" },
-        "singularLabel": { "type": "string", "description": "Singular label, e.g. Utilisateur" },
-        "description": { "type": "string", "description": "Text under the list page title" },
-        "hidden": { "type": "boolean", "description": "Leave this resource out of the dashboard" },
+        "label": {
+          "type": "string",
+          "description": "Plural label, e.g. Utilisateurs"
+        },
+        "singularLabel": {
+          "type": "string",
+          "description": "Singular label, e.g. Utilisateur"
+        },
+        "description": {
+          "type": "string",
+          "description": "Text under the list page title"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Leave this resource out of the dashboard"
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9-]*$",
+          "description": "Sidebar icon: a lucide-react icon name, e.g. users, shopping-cart, Package"
+        },
         "columns": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Table columns, in order; others are left out"
+        },
+        "filters": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "const": false
+            }
+          ],
+          "description": "Filters above the table (list query parameters), in order; false for none"
+        },
+        "permissions": {
+          "$ref": "#/definitions/permissions"
         },
         "fields": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/definitions/field" },
+          "additionalProperties": {
+            "$ref": "#/definitions/field"
+          },
           "description": "Per field, by property name"
         },
         "actions": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/definitions/action" },
+          "additionalProperties": {
+            "$ref": "#/definitions/action"
+          },
           "description": "Per row action, by operationId"
         }
       }
@@ -105,17 +275,85 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "label": { "type": "string" },
+        "label": {
+          "type": "string"
+        },
         "hidden": {
-          "oneOf": [{ "type": "boolean" }, { "enum": ["table", "form"] }],
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "table",
+                "form"
+              ]
+            }
+          ],
           "description": "Hide everywhere, or only in the table or the form"
         },
-        "order": { "type": "number", "description": "Position in forms (lower first)" },
-        "help": { "type": "string", "description": "Help text under the input" },
-        "placeholder": { "type": "string" },
+        "order": {
+          "type": "number",
+          "description": "Position in forms (lower first)"
+        },
+        "help": {
+          "type": "string",
+          "description": "Help text under the input"
+        },
+        "placeholder": {
+          "type": "string"
+        },
         "widget": {
-          "enum": ["text", "textarea", "password", "email", "url", "date", "datetime"],
+          "enum": [
+            "text",
+            "textarea",
+            "password",
+            "email",
+            "url",
+            "date",
+            "datetime"
+          ],
           "description": "Input for text fields"
+        },
+        "reference": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "const": false
+            }
+          ],
+          "description": "The resource this id points at, e.g. roles for roleId; false if it is not a reference"
+        },
+        "display": {
+          "type": "string",
+          "description": "Property of the referenced records shown instead of the id, e.g. name"
+        },
+        "cell": {
+          "enum": [
+            "text",
+            "number",
+            "currency",
+            "boolean",
+            "badge",
+            "date",
+            "datetime",
+            "link",
+            "email",
+            "image",
+            "list",
+            "json"
+          ],
+          "description": "How the table and the detail page show the value"
+        },
+        "component": {
+          "type": "string",
+          "description": "Your own input: \"@/components/ColorPicker\" (default export) or \"@/components/inputs#ColorPicker\"; gets { name, value, onChange, onBlur }"
+        },
+        "cellComponent": {
+          "type": "string",
+          "description": "Your own table cell, imported the same way; gets { value, row }"
         }
       }
     },
@@ -123,8 +361,105 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "label": { "type": "string", "description": "Button label" },
-        "hidden": { "type": "boolean", "description": "Leave the button out" }
+        "label": {
+          "type": "string",
+          "description": "Button label"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Leave the button out"
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Permissions the signed-in user needs (any of them) to see each page or button",
+      "properties": {
+        "list": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Sidebar entry and list page"
+        },
+        "view": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ],
+          "description": "Detail page"
+        },
+        "create": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "update": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "delete": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "actions": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "description": "Per row action, by operationId"
+        }
       }
     }
   }

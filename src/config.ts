@@ -121,6 +121,32 @@ export async function loadConfig(configPath?: string, cwd = process.cwd()): Prom
 
 const isListed = (field: Field) => !['object', 'unknown'].includes(field.type) && !(field.type === 'array' && field.items?.isObject);
 
+// A lucide-react icon for common resource names
+const ICONS: Array<[RegExp, string]> = [
+    [/(user|people|person|member|customer|client|employee|staff|account|contact|author|student)/, 'users'],
+    [/(team|group|organi[sz]ation|compan)/, 'building-2'],
+    [/(role|permission|polic|access)/, 'shield'],
+    [/(product|item|inventory|stock|catalog)/, 'package'],
+    [/(order|cart|purchase|checkout)/, 'shopping-cart'],
+    [/(categor|tag|label)/, 'tags'],
+    [/(document|file|attachment|upload|media|asset)/, 'file-text'],
+    [/(image|photo|picture|gallery)/, 'image'],
+    [/(event|calendar|booking|reservation|appointment|schedule)/, 'calendar'],
+    [/(invoice|payment|transaction|billing|receipt|refund)/, 'receipt'],
+    [/(post|article|blog|news|page)/, 'newspaper'],
+    [/(comment|review|feedback|message|chat|conversation)/, 'message-square'],
+    [/(notification|alert)/, 'bell'],
+    [/(project|folder|workspace)/, 'folder'],
+    [/(task|todo|ticket|issue)/, 'list-checks'],
+    [/(setting|config|preference)/, 'settings'],
+    [/(location|address|place|store|shop|venue)/, 'map-pin'],
+    [/(report|stat|analytic|metric)/, 'chart-column'],
+    [/(log|audit|history|activit)/, 'history'],
+    [/(health|status|monitor)/, 'activity'],
+];
+
+const guessIcon = (model: Model) => ICONS.find(([pattern]) => pattern.test(model.key.toLowerCase()))?.[1];
+
 function resourceDesign(model: Model, loginFields: Field[]): Record<string, unknown> {
     // The columns the dashboard would show by default, so editing the list is the only step
     const columns = model.columns.filter(field => isListed(field) && !field.writeOnly && !field.hidden.table).map(field => field.name);
@@ -129,9 +155,11 @@ function resourceDesign(model: Model, loginFields: Field[]): Record<string, unkn
         if (!fields[field.name]) fields[field.name] = { label: field.label };
     }
     const actions = Object.fromEntries(model.actions.map(action => [action.op.operationId ?? action.op.functionName, { label: action.label }]));
+    const icon = model.crud.list ? guessIcon(model) : undefined;
     return {
         label: model.pluralLabel,
         singularLabel: model.singularLabel,
+        ...(icon ? { icon } : {}),
         ...(model.crud.list && columns.length > 0 ? { columns } : {}),
         fields,
         ...(model.actions.length > 0 ? { actions } : {}),
@@ -185,11 +213,14 @@ export async function createDesignFile(input: string, options: { output?: string
         '#',
         '# More you can add under "ui":',
         `#   locale: ${Object.keys(LOCALES).join(' | ')}`,
+        '#   locales: [en, fr]        (a language switch; translate your labels under translations: { fr: { Users: Utilisateurs } })',
         '#   primaryColor: "#2563eb"',
         '#   theme: { radius: 0.5rem, font: "Inter, sans-serif", colors: { destructive: "#dc2626" } }',
         '#   labels: { addNew: New }',
-        '# Per resource: description, hidden: true, columns (order and choice)',
-        '# Per field: label, hidden (true | table | form), order, help, placeholder, widget (textarea, password, email, url, date, datetime)',
+        '#   currency: EUR    home: false',
+        '# Per resource: description, hidden: true, icon (lucide name), columns, filters, permissions: { create: users.write, delete: [admin] }',
+        '# Per field: label, hidden (true | table | form), order, help, placeholder, widget (textarea, password, email, url, date, datetime),',
+        '#   reference: roles, display: name, cell (badge, currency, image, link, ...), component: "@/components/ColorPicker", cellComponent',
         '# Per action: label, hidden: true',
         '',
     ];

@@ -1,0 +1,353 @@
+openapi: 3.0.3
+info:
+  title: Bookstore
+  version: "1.0"
+  description: A small bookstore API to try api-gen-package with. Run it with `npx generate-api mock`.
+servers:
+  - url: https://api.bookstore.example/v1
+security: [{bearerAuth: []}]
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string, format: password}
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Session'}
+        "401": {description: Wrong email or password}
+  /auth/refresh:
+    post:
+      operationId: refresh
+      tags: [Auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [refreshToken], properties: {refreshToken: {type: string}}}
+      responses:
+        "200":
+          description: A new access token
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Session'}
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      responses:
+        "204": {description: Signed out}
+
+  /books:
+    get:
+      operationId: listBooks
+      tags: [Books]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: q, in: query, description: Search in titles, schema: {type: string}}
+        - {name: sort, in: query, description: 'Field to sort by, "-" first for descending', schema: {type: string}}
+        - {name: genre, in: query, schema: {$ref: '#/components/schemas/Genre'}}
+        - {name: authorId, in: query, schema: {type: integer}}
+        - {name: inStock, in: query, schema: {type: boolean}}
+      responses:
+        "200":
+          description: A page of books
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Book'}}
+                  total: {type: integer}
+    post:
+      operationId: createBook
+      tags: [Books]
+      x-permission: books.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BookInput'}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Book'}
+        "422": {description: Invalid book}
+  /books/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get:
+      operationId: getBook
+      tags: [Books]
+      responses:
+        "200":
+          description: A book
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Book'}
+    put:
+      operationId: updateBook
+      tags: [Books]
+      x-permission: books.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BookInput'}
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Book'}
+    delete:
+      operationId: deleteBook
+      tags: [Books]
+      x-permission: books.delete
+      responses:
+        "204": {description: Deleted}
+  /books/{id}/reviews:
+    get:
+      operationId: listBookReviews
+      tags: [Books]
+      summary: Reviews
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses:
+        "200":
+          description: Reviews of the book
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Review'}}
+  /books/{id}/restock:
+    post:
+      operationId: restockBook
+      tags: [Books]
+      summary: Restock
+      x-permission: books.write
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: Restocked
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Book'}
+
+  /authors:
+    get:
+      operationId: listAuthors
+      tags: [Authors]
+      responses:
+        "200":
+          description: All authors
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/Author'}}
+    post:
+      operationId: createAuthor
+      tags: [Authors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuthorInput'}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Author'}
+  /authors/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get:
+      operationId: getAuthor
+      tags: [Authors]
+      responses:
+        "200":
+          description: An author
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Author'}
+    patch:
+      operationId: updateAuthor
+      tags: [Authors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuthorInput'}
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Author'}
+    delete:
+      operationId: deleteAuthor
+      tags: [Authors]
+      x-permission: authors.delete
+      responses:
+        "204": {description: Deleted}
+
+  /orders:
+    get:
+      operationId: listOrders
+      tags: [Orders]
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: status, in: query, schema: {$ref: '#/components/schemas/OrderStatus'}}
+      responses:
+        "200":
+          description: A page of orders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/Order'}}
+                  total: {type: integer}
+    post:
+      operationId: createOrder
+      tags: [Orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OrderInput'}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+  /orders/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get:
+      operationId: getOrder
+      tags: [Orders]
+      responses:
+        "200":
+          description: An order
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+  /orders/{id}/cancel:
+    post:
+      operationId: cancelOrder
+      tags: [Orders]
+      summary: Cancel
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    Page: {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+    Limit: {name: limit, in: query, schema: {type: integer, default: 20}}
+  schemas:
+    Session:
+      type: object
+      properties:
+        accessToken: {type: string}
+        refreshToken: {type: string}
+        user:
+          type: object
+          properties:
+            name: {type: string}
+            email: {type: string, format: email}
+            permissions: {type: array, items: {type: string}}
+    Genre:
+      type: string
+      enum: [fiction, non-fiction, poetry, children, science]
+    BookInput:
+      type: object
+      required: [title, authorId, price, genre]
+      properties:
+        title: {type: string}
+        authorId: {type: integer}
+        genre: {$ref: '#/components/schemas/Genre'}
+        price: {type: number, minimum: 0}
+        stock: {type: integer, minimum: 0}
+        inStock: {type: boolean}
+        coverUrl: {type: string, format: uri}
+        publishedOn: {type: string, format: date}
+        summary: {type: string, x-widget: textarea}
+    Book:
+      allOf:
+        - {$ref: '#/components/schemas/BookInput'}
+        - type: object
+          properties:
+            id: {type: integer, readOnly: true}
+            createdAt: {type: string, format: date-time, readOnly: true}
+    Review:
+      type: object
+      properties:
+        id: {type: integer}
+        reviewer: {type: string}
+        rating: {type: integer, minimum: 1, maximum: 5}
+        comment: {type: string}
+        createdAt: {type: string, format: date-time}
+    AuthorInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        email: {type: string, format: email}
+        website: {type: string, format: uri}
+        bio: {type: string}
+    Author:
+      allOf:
+        - {$ref: '#/components/schemas/AuthorInput'}
+        - type: object
+          properties:
+            id: {type: integer, readOnly: true}
+    OrderStatus:
+      type: string
+      enum: [pending, paid, shipped, cancelled]
+    OrderInput:
+      type: object
+      required: [customerEmail, bookIds]
+      properties:
+        customerEmail: {type: string, format: email}
+        bookIds: {type: array, items: {type: integer}}
+        note: {type: string}
+    Order:
+      allOf:
+        - {$ref: '#/components/schemas/OrderInput'}
+        - type: object
+          properties:
+            id: {type: integer, readOnly: true}
+            status: {$ref: '#/components/schemas/OrderStatus'}
+            total: {type: number, readOnly: true}
+            placedAt: {type: string, format: date-time, readOnly: true}

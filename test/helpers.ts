@@ -56,6 +56,7 @@ export function typecheck(dir: string): void {
                 '@/*': ['./src/*'],
                 'next/link': [`${stubs}/next/link.tsx`],
                 'next/navigation': [`${stubs}/next/navigation.ts`],
+                'lucide-react': [`${stubs}/lucide-react.tsx`],
             },
         },
         include: ['src', stubs],

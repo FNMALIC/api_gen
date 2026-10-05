@@ -142,6 +142,8 @@ export interface Operation {
     functionName: string;
     /** x-label on the operation: the label of its button in the dashboard */
     xLabel?: unknown;
+    /** x-permission / x-permissions on the operation: any of these lets the user call it */
+    permissions?: string[];
 }
 
 export interface Field {
@@ -162,7 +164,37 @@ export interface Field {
     widget?: string;
     items?: { type: string; format?: string; enum?: unknown[]; isObject: boolean };
     isMap?: boolean;
+    /** A foreign key: roleId -> roles, tagIds -> tags. Rendered as a select (or checkboxes) and shown by name. */
+    reference?: Reference;
+    /** How the table and the detail page show the value (default: from the type, format and name) */
+    cell?: CellKind;
+    /** Custom input component from the design file: a module path, "#Name" for a named export */
+    component?: string;
+    /** Custom cell component from the design file */
+    cellComponent?: string;
     properties?: Field[];
+}
+
+export type CellKind = 'text' | 'number' | 'currency' | 'boolean' | 'badge' | 'date' | 'datetime' | 'link' | 'email' | 'image' | 'list' | 'json';
+
+export interface Reference {
+    /** Key of the referenced model (its name in the URL) */
+    resource: string;
+    /** Property of the referenced rows that holds their id */
+    idKey: string;
+    /** Property of the referenced rows shown to people, e.g. name */
+    display: string;
+    /** An array of ids */
+    many: boolean;
+}
+
+/** A list query parameter offered as a filter above the table */
+export interface Filter {
+    name: string;
+    label: string;
+    kind: 'enum' | 'boolean' | 'text' | 'number' | 'date' | 'reference';
+    options?: unknown[];
+    reference?: Reference;
 }
 
 export interface ListCapabilities {
@@ -203,6 +235,35 @@ export interface Model {
     /** Item operations outside create/read/update/delete, e.g. POST /users/{id}/status */
     actions: Action[];
     listCapabilities: ListCapabilities | null;
+    /** Property of the rows that holds their id, used in links and calls */
+    idKey: string;
+    /** List query parameters offered as filters */
+    filters: Filter[];
+    /** Permissions needed per action (any of the listed ones), from x-permission or the design file */
+    permissions: ResourcePermissions;
+    /** Lists under one record, shown as tabs on its detail page: GET /users/{id}/posts */
+    subResources: SubResource[];
+    /** Sidebar icon (lucide-react name), from the design file */
+    icon?: string;
+}
+
+/** GET <collection>/{id}/<name> returning a list */
+export interface SubResource {
+    op: Operation;
+    label: string;
+    /** PascalCase name used for the hook (use<Name>) */
+    Name: string;
+    columns: Field[];
+}
+
+export interface ResourcePermissions {
+    list?: string[];
+    view?: string[];
+    create?: string[];
+    update?: string[];
+    delete?: string[];
+    /** By action Name (e.g. SetUserStatus) */
+    actions: Record<string, string[]>;
 }
 
 export interface Action {
@@ -224,6 +285,16 @@ export interface LoginInfo {
     fields: Field[];
     /** Where the token is in what the API function returns, e.g. ["accessToken"] or ["data", "token"] */
     tokenPath: string[];
+    /** Where the signed-in user's permissions (or roles) are, e.g. ["user", "permissions"] */
+    permissionsPath: string[] | null;
+    /** Where the signed-in user's name or email is, e.g. ["user", "email"] */
+    userNamePath: string[] | null;
+    /** Where the refresh token is, e.g. ["refreshToken"] */
+    refreshTokenPath: string[] | null;
+    /** POST .../logout, called when signing out */
+    logout: { model: Model; op: Operation } | null;
+    /** POST .../refresh: trades the refresh token for a new access token when a request gets 401 */
+    refresh: { model: Model; op: Operation; field: string; tokenPath: string[]; refreshTokenPath: string[] | null } | null;
 }
 
 /** Generated files: path relative to the output directory -> content */
@@ -238,7 +309,7 @@ export interface TemplateContext {
     defaultContent: string;
 }
 
-export type TemplateKind = 'api' | 'hooks' | 'listPage' | 'createPage' | 'editPage' | 'form' | 'layout' | 'routes' | 'loginPage';
+export type TemplateKind = 'api' | 'hooks' | 'listPage' | 'createPage' | 'editPage' | 'detailPage' | 'homePage' | 'form' | 'layout' | 'routes' | 'loginPage';
 
 /** Return new content for a generated file, or undefined to keep the default */
 export type Templates = Partial<Record<TemplateKind, (context: TemplateContext) => string | undefined | null>>;

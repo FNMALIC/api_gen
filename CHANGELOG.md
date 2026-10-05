@@ -1,8 +1,53 @@
 # Changelog
 
-## 2.2.0 (unreleased)
+## 3.0.0 (unreleased)
 
-Improvements from a real back-office build, and options to customize the dashboard.
+A complete back office from the API alone: relations, filters, detail pages, permissions, refresh tokens, six
+languages, a mock API and a `create` command. Also includes the unreleased 2.2.0 changes listed further down.
+
+### Added
+
+- Relations: `roleId`, `categoryId`, `tagIds`... are linked to the resource they name. Forms get a select (or
+  checkboxes) filled from it; tables and detail pages show its name instead of the id. `reference`, `display` and
+  `reference: false` in the design file for the rest.
+- Filters above tables from the list endpoint's other query parameters (enums, booleans, references, numbers,
+  dates, text). `filters` in the design file picks and orders them.
+- Detail pages (`/users/:id`) with every field, Edit and Delete, and tabs for lists under the record: sub-resources
+  (`GET /users/{id}/sessions`, with a `useListUserSessions` hook) and resources filtered by it (`GET /posts?userId=`).
+- Tables show values by kind: badges for booleans and enums, amounts (`ui.currency`), formatted dates, links,
+  emails, images. `cell` (or `x-cell`) chooses; `cellComponent` renders your own.
+- Row selection with bulk delete (`useDelete<Resources>`), and CSV export of the rows on screen.
+- Validation messages from the server are shown under their fields (Laravel, Rails, express-validator, Joi,
+  class-validator and FastAPI shapes, also inside envelopes). Forms take an `error` prop for this.
+- Permissions: `x-permission` on operations or `permissions` per resource in the design file; buttons, pages and
+  sidebar entries are hidden from signed-in users without them (read from the sign-in response or the JWT).
+- Sessions: refresh tokens (a 401 refreshes once and retries), `POST .../logout` called on sign-out, the signed-in
+  user's name in the sidebar.
+- Home page (`/`, or `/dashboard` with Next.js) with the number of records of each resource. `ui.home: false` keeps
+  the redirect to the first resource.
+- Sidebar icons (`icon: users`, any lucide-react icon; `init` suggests some), and a menu button for phones.
+- Spanish, German, Portuguese and Italian (`es`, `de`, `pt`, `it`); `ui.locales` adds a language switch, and
+  `ui.translations` translates your own labels.
+- Custom input components per field (`component: "@/components/ColorPicker"`).
+- `generate-api mock`: a mock API with fake data shaped like the document's responses, paging, filters, validation
+  and sign-in.
+- `generate-api create <dir> [input]`: a new Vite + React + Tailwind + shadcn/ui app with the dashboard generated, a
+  design file, and a dev server proxying to the mock or to `API_URL`.
+- `--watch` also regenerates when the design file changes.
+- `x-widget` and `x-cell` schema extensions.
+- `examples/bookstore`: an API and design file to try all of this.
+- `generate()` returns the npm packages the dashboard needs (`dependencies`), which the CLI prints.
+
+### Changed
+
+- Edit pages moved from `/users/:id` to `/users/:id/edit` (`[id]/edit/page.tsx` with Next.js); `/users/:id` is the
+  detail page. Saving goes back to the detail page.
+- `/` is the home page instead of a redirect to the first resource.
+- Reference fields are labelled without their `Id` suffix ("Category", not "Category Id") unless `x-label` says
+  otherwise.
+- `CheckboxGroup` takes string or number values; `NativeSelect` takes boolean ones too.
+
+Improvements from a real back-office build, and options to customize the dashboard (unreleased 2.2.0):
 
 ### Fixed
 

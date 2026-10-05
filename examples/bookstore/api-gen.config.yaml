@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=../../config.schema.json
+#
+# Design of the bookstore back office. Try it:
+#   npx -p api-gen-package generate-api create my-bookstore --example bookstore
+# or, to see what each option does, edit this file and run from this folder: npx generate-api --watch
+input: ./openapi.yaml
+output: ./src
+router: react-router
+ui:
+  title: Bookstore
+  # English by default; French in the language switch at the bottom of the sidebar
+  locales: [en, fr]
+  translations:
+    fr:
+      Bookstore: Librairie
+      Books: Livres
+      Book: Livre
+      Authors: Auteurs
+      Author: Auteur
+      Orders: Commandes
+      Order: Commande
+      Title: Titre
+      Genre: Genre
+      Price: Prix
+      Stock: Stock
+      In stock: En stock
+      Cover: Couverture
+      Published on: Publié le
+      Reviews: Avis
+      Restock: Réapprovisionner
+      Quantity: Quantité
+      Cancel order: Annuler la commande
+      Customer: Client
+      Total: Total
+      Placed at: Passée le
+  currency: EUR
+  primaryColor: "#7c3aed"
+  theme:
+    radius: 0.75rem
+  pageSize: 10
+  nav: [books, authors, orders]
+  resources:
+    books:
+      icon: book-open
+      description: Everything on the shelves.
+      columns: [title, authorId, genre, price, stock, inStock, coverUrl]
+      filters: [genre, authorId, inStock]
+      permissions:
+        create: books.write
+        update: books.write
+      fields:
+        authorId: { label: Author, display: name }
+        inStock: { label: In stock }
+        coverUrl: { label: Cover, placeholder: https://… }
+        publishedOn: { label: Published on }
+        summary: { help: Shown on the book's page in the shop }
+      actions:
+        restockBook: { label: Restock }
+    authors:
+      icon: pen-line
+      columns: [name, email, website]
+    orders:
+      icon: shopping-cart
+      columns: [id, customerEmail, bookIds, status, total, placedAt]
+      fields:
+        customerEmail: { label: Customer }
+        bookIds: { label: Books }
+        placedAt: { label: Placed at }
+      actions:
+        cancelOrder: { label: Cancel order }

@@ -1,6 +1,6 @@
 /**
- * End-to-end test: generate a dashboard into a real Vite + React + shadcn/ui app, type-check and build it,
- * then click through it in Chromium against a mocked API.
+ * End-to-end test: generate a dashboard into a real Vite + React + shadcn/ui app (scaffolded like
+ * `generate-api create` does), type-check and build it, then click through it in Chromium against a mocked API.
  *
  *   npm run test:e2e
  *
@@ -18,7 +18,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { chromium, type Browser, type Page, type Route } from 'playwright-core';
-import { generate, loadConfig, type GenerateOptions } from '../../src/index.ts';
+import { appFiles, generate, loadConfig, loadSpec, type GenerateOptions } from '../../src/index.ts';
+import { APP_DEPENDENCIES, APP_DEV_DEPENDENCIES, SHADCN_BASE_DEPENDENCIES } from '../../src/create.ts';
 import { binScript } from '../helpers.ts';
 import { SHADCN_COMPONENTS, dashboardDependencies } from '../../src/generators/dashboard.ts';
 
@@ -28,10 +29,10 @@ const FALLBACK_UI = path.join(import.meta.dirname, 'fallback-ui');
 const useFallbackUi = process.env.E2E_UI === 'fallback';
 const useShadcnInit = process.env.E2E_UI === 'init';
 
-// Exactly what the CLI tells users to install, so a missing package fails the test
-const APP_DEPENDENCIES = ['react@19', 'react-dom@19', ...dashboardDependencies('react-router')];
-const APP_DEV_DEPENDENCIES = ['vite@7', '@vitejs/plugin-react@5', 'typescript@5', '@types/react@19', '@types/react-dom@19', 'tailwindcss@4', '@tailwindcss/vite@4'];
-const SHADCN_BASE_DEPENDENCIES = ['class-variance-authority', 'clsx', 'tailwind-merge', 'lucide-react', 'tw-animate-css'];
+// Exactly what the CLI tells users to install (the designs use icons), so a missing package fails the test.
+// api-gen-package itself is this checkout, not the published version.
+const DEPENDENCIES = [...APP_DEPENDENCIES, ...dashboardDependencies('react-router', { icons: true })];
+const DEV_DEPENDENCIES = APP_DEV_DEPENDENCIES.filter(name => name !== 'api-gen-package');
 const FALLBACK_DEPENDENCIES = [
     '@radix-ui/react-slot',
     '@radix-ui/react-label',
@@ -41,6 +42,7 @@ const FALLBACK_DEPENDENCIES = [
     'class-variance-authority',
     'clsx',
     'tailwind-merge',
+    'tw-animate-css',
 ];
 
 // npm and npx are .cmd shims on Windows, which only run through a shell
@@ -58,87 +60,25 @@ function writeFile(relativePath: string, content: string) {
     fs.writeFileSync(path.join(APP, relativePath), content);
 }
 
-// A plain Vite + React + Tailwind app, configured the way the shadcn/ui Vite guide describes
-function scaffoldApp() {
-    writeFile('package.json', JSON.stringify({ name: 'e2e-app', private: true, type: 'module' }, null, 2));
-    writeFile(
-        'index.html',
-        '<!doctype html>\n<html lang="en"><head><meta charset="UTF-8" /><title>e2e</title></head>' +
-            '<body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>\n'
-    );
-    writeFile(
-        'vite.config.ts',
-        `import path from "node:path";
-import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
-
-export default defineConfig({
-    plugins: [react(), tailwindcss()],
-    resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
-});
-`
-    );
-    // Strict settings, matching Vite's react-ts template
-    writeFile(
-        'tsconfig.json',
-        JSON.stringify(
-            {
-                compilerOptions: {
-                    target: 'ES2022',
-                    lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-                    module: 'ESNext',
-                    moduleResolution: 'bundler',
-                    jsx: 'react-jsx',
-                    strict: true,
-                    noUnusedLocals: true,
-                    noUnusedParameters: true,
-                    noFallthroughCasesInSwitch: true,
-                    verbatimModuleSyntax: true,
-                    skipLibCheck: true,
-                    noEmit: true,
-                    paths: { '@/*': ['./src/*'] },
-                },
-                include: ['src'],
-            },
-            null,
-            2
-        )
-    );
-    // Like shadcn's own index.css: it defines the color tokens too, and is imported after the dashboard,
-    // so a theme override has to win on specificity, not file order
-    writeFile(
-        'src/index.css',
-        '@import "tailwindcss";\n:root {\n    --primary: oklch(0.205 0 0);\n}\n.dark {\n    --primary: oklch(0.922 0 0);\n}\n'
-    );
-    if (useShadcnInit) return; // shadcn init writes components.json itself
-    writeFile(
-        'components.json',
-        JSON.stringify(
-            {
-                $schema: 'https://ui.shadcn.com/schema.json',
-                style: 'new-york',
-                rsc: false,
-                tsx: true,
-                tailwind: { config: '', css: 'src/index.css', baseColor: 'neutral', cssVariables: true, prefix: '' },
-                aliases: { components: '@/components', utils: '@/lib/utils', ui: '@/components/ui', lib: '@/lib', hooks: '@/hooks' },
-                iconLibrary: 'lucide',
-            },
-            null,
-            2
-        )
-    );
+// The app `generate-api create` writes; shadcn init brings its own components.json and CSS
+async function scaffoldApp() {
+    const api = await loadSpec(path.join(ROOT, 'test', 'fixtures', 'shop.json'));
+    for (const [file, content] of Object.entries(appFiles('e2e-app', api, 'openapi.json'))) {
+        if (useShadcnInit && (file === 'components.json' || file === 'src/index.css')) continue;
+        writeFile(file, content);
+    }
+    if (useShadcnInit) writeFile('src/index.css', '@import "tailwindcss";\n');
 }
 
-function installApp() {
-    const installed = fs.existsSync(path.join(APP, 'node_modules', 'vite'));
+async function installApp() {
+    const installed = fs.existsSync(path.join(APP, 'node_modules', 'vite')) && fs.existsSync(path.join(APP, 'node_modules', 'lucide-react'));
     if (process.env.E2E_REUSE && installed) return;
 
     fs.rmSync(APP, { recursive: true, force: true });
     fs.mkdirSync(APP, { recursive: true });
-    scaffoldApp();
-    run('npm', ['install', '--no-audit', '--no-fund', ...APP_DEPENDENCIES]);
-    run('npm', ['install', '--no-audit', '--no-fund', '-D', ...APP_DEV_DEPENDENCIES]);
+    await scaffoldApp();
+    run('npm', ['install', '--no-audit', '--no-fund', ...DEPENDENCIES]);
+    run('npm', ['install', '--no-audit', '--no-fund', '-D', ...DEV_DEPENDENCIES]);
     if (useShadcnInit) {
         // Whatever a new project gets today, answering every prompt with its default
         execFileSync('npx', ['--yes', 'shadcn@latest', 'init', '--yes', '--defaults', '--force'], {
@@ -153,18 +93,8 @@ function installApp() {
         run('npm', ['install', '--no-audit', '--no-fund', ...FALLBACK_DEPENDENCIES]);
         fs.cpSync(FALLBACK_UI, path.join(APP, 'src'), { recursive: true });
     } else {
-        // What `shadcn init` sets up: the base dependencies and the cn() helper the components import
+        // What `generate-api create` installs, then the real components from the registry
         run('npm', ['install', '--no-audit', '--no-fund', ...SHADCN_BASE_DEPENDENCIES]);
-        writeFile(
-            'src/lib/utils.ts',
-            `import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs));
-}
-`
-        );
         run('npx', ['--yes', 'shadcn@latest', 'add', '--yes', '--overwrite', ...SHADCN_COMPONENTS]);
     }
 }
@@ -201,6 +131,8 @@ interface Product {
     name: string;
     price: number;
     status: string;
+    categoryId?: number;
+    imageUrl?: string;
     tags?: string[];
     channels?: string[];
     dimensions?: Record<string, unknown>;
@@ -217,12 +149,19 @@ const api = {
     lastRawBody: '',
 };
 
+const CATEGORIES = [
+    { id: 1, label: 'Lamps' },
+    { id: 2, label: 'Desks' },
+];
+
 function resetApi() {
     api.products = Array.from({ length: 23 }, (_, i) => ({
         productId: `p${i + 1}`,
         name: `Product ${String(i + 1).padStart(2, '0')}`,
         price: 10 + i,
         status: i % 3 ? 'published' : 'draft',
+        categoryId: (i % 2) + 1,
+        imageUrl: `https://example.com/images/p${i + 1}.png`,
         tags: ['a', 'b'],
         availableFrom: '2026-01-15T10:30:00.000Z',
         createdAt: '2026-01-01T00:00:00.000Z',
@@ -240,6 +179,8 @@ async function handle(route: Route) {
 
     if (url.pathname === '/v1/products' && method === 'GET') {
         let rows = api.products.filter(row => !query.search || row.name.toLowerCase().includes(query.search.toLowerCase()));
+        if (query.status) rows = rows.filter(row => row.status === query.status);
+        if (query.categoryId) rows = rows.filter(row => String(row.categoryId) === query.categoryId);
         if (query.sortBy) {
             const key = query.sortBy as keyof Product;
             const direction = query.sortOrder === 'DESC' ? -1 : 1;
@@ -253,6 +194,8 @@ async function handle(route: Route) {
         api.lastBody = request.postDataJSON();
         const body = api.lastBody as Product;
         if (body.name === 'Taken') return route.fulfill({ status: 409, json: { message: 'Name already taken' } });
+        // Validation errors per field, Laravel style
+        if (body.name === 'Invalid') return route.fulfill({ status: 422, json: { message: 'The given data was invalid.', errors: { name: ['Name must be unique'] } } });
         return route.fulfill({ status: 201, json: { ...body, productId: 'new' } });
     }
     const productMatch = url.pathname.match(/^\/v1\/products\/([^/]+)$/);
@@ -270,6 +213,8 @@ async function handle(route: Route) {
         api.products = api.products.filter(row => row.productId !== productMatch[1]);
         return route.fulfill({ status: 204 });
     }
+    if (url.pathname === '/v1/product-categories' && method === 'GET') return route.fulfill({ json: CATEGORIES });
+    if (url.pathname === '/v1/orders' && method === 'GET') return route.fulfill({ json: [{ id: 1, status: 'paid', total: 12.5, productIds: ['p1', 'p2'] }] });
     if (url.pathname === '/v1/documents' && method === 'GET') {
         return route.fulfill({ json: [{ id: 1, title: 'Handbook', url: 'https://example.com/h.pdf', uploadedAt: '2026-02-02T09:00:00Z' }] });
     }
@@ -341,7 +286,7 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
     const pageErrors: string[] = [];
 
     before(async () => {
-        installApp();
+        await installApp();
         await generateInto('shop.json');
     });
 
@@ -355,7 +300,7 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
     it('builds and serves', async () => {
         ({ server, baseUrl } = await buildAndServe());
         browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
-        page = await browser.newPage();
+        page = await browser.newPage({ acceptDownloads: true });
         page.on('pageerror', error => pageErrors.push(error.message));
         await page.route('**/v1/**', handle);
         resetApi();
@@ -365,8 +310,17 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
     const productNames = async () => (await mainText()).match(/Product \d+/g) ?? [];
     const lastRequest = (pathname: string) => [...api.requests].reverse().find(request => request.path === pathname)!;
 
+    it('opens on a home page with the number of records of each resource', async () => {
+        await page.goto(baseUrl);
+        await page.getByRole('heading', { name: 'Shop' }).waitFor();
+        const card = page.locator('main a', { hasText: 'Products' });
+        await card.getByText('23').waitFor();
+        assert.deepEqual(lastRequest('/v1/products').query, { page: '1', pageSize: '1' }, 'counts with a one-row page and the total');
+        await card.click();
+        await page.waitForURL(`${baseUrl}/products`);
+    });
+
     it('lists with server-side pagination and sends credentials', async () => {
-        await page.goto(`${baseUrl}/products`);
         await page.getByText('Product 01').waitFor();
         assert.equal((await productNames()).length, 10);
         assert.match(await mainText(), /Page 1 of 3/);
@@ -377,6 +331,16 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
         await page.getByText('Product 11').waitFor();
         assert.match(await mainText(), /Page 2 of 3/);
         assert.equal(lastRequest('/v1/products').query.page, '2');
+    });
+
+    it('shows names for references, amounts, images and badges', async () => {
+        await page.goto(`${baseUrl}/products`);
+        await page.getByText('Product 01').waitFor();
+        const firstRow = page.locator('tbody tr').first();
+        await firstRow.getByText('Lamps').waitFor();
+        assert.match(await firstRow.innerText(), /\$10\.00/, 'price as an amount');
+        assert.equal(await firstRow.locator('img').getAttribute('src'), 'https://example.com/images/p1.png');
+        assert.ok(api.requests.some(request => request.path === '/v1/product-categories'), 'category names come from GET /product-categories');
     });
 
     it('searches and sorts on the server', async () => {
@@ -395,6 +359,31 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
         assert.ok((await mainText()).includes(new Date('2026-01-15T10:30:00.000Z').toLocaleString()), 'date-time cells are formatted');
     });
 
+    it('filters with the list query parameters', async () => {
+        await page.goto(`${baseUrl}/products`);
+        await page.getByText('Product 01').waitFor();
+        await page.getByRole('combobox', { name: 'Status' }).selectOption('draft');
+        await page.getByText('Page 1 of 1').waitFor();
+        assert.equal(lastRequest('/v1/products').query.status, 'draft');
+        assert.equal((await productNames()).length, 8);
+
+        await page.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Desks' });
+        await page.waitForFunction('document.querySelectorAll("tbody tr").length === 4');
+        assert.deepEqual(lastRequest('/v1/products').query, { page: '1', pageSize: '10', status: 'draft', categoryId: '2' });
+
+        await page.getByRole('button', { name: 'Clear filters' }).click();
+        await page.getByText('Page 1 of 3').waitFor();
+    });
+
+    it('exports the rows as CSV', async () => {
+        const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export CSV' }).click()]);
+        assert.equal(download.suggestedFilename(), 'products.csv');
+        const csv = fs.readFileSync(await download.path(), 'utf8');
+        assert.match(csv.split('\r\n')[0], /^\uFEFFProduct name,Price,Status,Category/);
+        assert.match(csv, /Product 01,10,Draft|Product 01,10,draft/);
+        assert.match(csv, /Lamps/, 'references by name');
+    });
+
     it('validates and creates a product with every kind of field', async () => {
         await page.goto(`${baseUrl}/products/create`);
         await page.getByRole('button', { name: 'Create' }).click();
@@ -406,6 +395,7 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
         await page.locator('input[name=name]').fill('Lamp');
         await page.locator('input[name=price]').fill('19.5');
         await page.locator('select[name=status]').selectOption('published');
+        await page.locator('select[name=categoryId]').selectOption({ label: 'Desks' });
         const tags = page.getByPlaceholder('Type and press Enter');
         await tags.fill('desk');
         await tags.press('Enter');
@@ -422,6 +412,7 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
             name: 'Lamp',
             price: 19.5,
             status: 'published',
+            categoryId: 2,
             featured: false,
             metadata: { color: 'blue' },
             tags: ['desk', 'light'],
@@ -444,16 +435,37 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
         assert.deepEqual(api.lastBody, { name: 'Taken', price: 1, status: 'draft', featured: false, tags: [], channels: [] });
     });
 
+    it('shows validation errors from the server under their fields', async () => {
+        await page.locator('input[name=name]').fill('Invalid');
+        await page.getByRole('button', { name: 'Create' }).click();
+        const message = page.locator('form').getByText('Name must be unique');
+        await message.waitFor();
+        assert.equal(await page.locator('input[name=name]').getAttribute('aria-invalid'), 'true');
+    });
+
+    it('shows a record on its detail page', async () => {
+        await page.goto(`${baseUrl}/products`);
+        await page.getByRole('link', { name: 'Product 03' }).click();
+        await page.waitForURL(`${baseUrl}/products/p3`);
+        await page.getByText('Lamps').waitFor();
+        const details = (await page.locator('dl').innerText()).replace(/\s+/g, ' ');
+        assert.match(details, /Product name Product 03/);
+        assert.match(details, /Category Lamps/);
+        assert.ok(await page.getByRole('link', { name: 'Edit' }).isVisible());
+    });
+
     it('edits a product with its values prefilled', async () => {
-        await page.goto(`${baseUrl}/products/p3`);
+        await page.getByRole('link', { name: 'Edit' }).click();
+        await page.waitForURL(`${baseUrl}/products/p3/edit`);
         await page.locator('input[name=name]').waitFor();
         assert.equal(await page.locator('input[name=name]').inputValue(), 'Product 03');
+        assert.equal(await page.locator('select[name=categoryId]').inputValue(), '1');
         assert.equal(await page.locator("input[name='dimensions.width']").inputValue(), '5');
         assert.deepEqual(JSON.parse(await page.locator('textarea').inputValue()), { color: 'red' });
 
         await page.locator('input[name=name]').fill('Product 03 v2');
         await page.getByRole('button', { name: 'Save' }).click();
-        await page.waitForURL(`${baseUrl}/products`);
+        await page.waitForURL(`${baseUrl}/products/p3`);
         const body = api.lastBody as Record<string, unknown>;
         assert.equal(body.name, 'Product 03 v2');
         assert.deepEqual(body.channels, ['web']);
@@ -462,7 +474,7 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
 
     it('blocks submitting invalid JSON', async () => {
         api.lastBody = null;
-        await page.goto(`${baseUrl}/products/p3`);
+        await page.goto(`${baseUrl}/products/p3/edit`);
         await page.locator('textarea').fill('{bad');
         await page.getByRole('button', { name: 'Save' }).click();
         await page.getByText('Invalid JSON').waitFor();
@@ -473,10 +485,25 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
         await page.goto(`${baseUrl}/products`);
         await page.getByPlaceholder('Search products...').fill('product 05');
         await page.getByText('Page 1 of 1').waitFor();
-        await page.getByRole('button', { name: 'Delete' }).click();
+        await page.getByRole('button', { name: 'Delete', exact: true }).click();
         await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
         await page.getByText('No results.').waitFor();
         assert.ok(api.requests.some(request => request.method === 'DELETE' && request.path === '/v1/products/p5'));
+    });
+
+    it('deletes the selected rows at once', async () => {
+        await page.goto(`${baseUrl}/products`);
+        await page.getByText('Product 01').waitFor();
+        const rows = page.locator('tbody tr');
+        await rows.nth(0).getByRole('checkbox').click();
+        await rows.nth(1).getByRole('checkbox').click();
+        await page.getByText('2 selected').waitFor();
+        await page.getByRole('button', { name: 'Delete selected' }).click();
+        await page.getByRole('alertdialog').getByText('Delete 2 items?').waitFor();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+        await page.getByText('2 deleted').waitFor();
+        const deleted = api.requests.filter(request => request.method === 'DELETE').map(request => request.path);
+        assert.ok(deleted.includes('/v1/products/p1') && deleted.includes('/v1/products/p2'));
     });
 
     it('uploads a file as multipart/form-data', async () => {
@@ -490,6 +517,20 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
         assert.match(api.lastRawBody, /name="title"\r\n\r\nContract/);
     });
 
+    it('opens the sidebar from a menu button on phones', async () => {
+        await page.setViewportSize({ width: 390, height: 800 });
+        await page.goto(`${baseUrl}/products`);
+        await page.getByText('Product 03').waitFor();
+        const sidebarLink = page.locator('aside').getByRole('link', { name: 'Orders' });
+        assert.equal(await sidebarLink.isVisible() && (await sidebarLink.boundingBox())!.x >= 0, false, 'the sidebar starts off-screen');
+        await page.getByRole('button', { name: 'Menu' }).click();
+        await page.waitForFunction('document.querySelector("aside").getBoundingClientRect().x >= 0');
+        await sidebarLink.click();
+        await page.waitForURL(`${baseUrl}/orders`);
+        await page.waitForFunction('document.querySelector("aside").getBoundingClientRect().right <= 0');
+        await page.setViewportSize({ width: 1280, height: 800 });
+    });
+
     it('had no uncaught errors in the page', () => {
         assert.deepEqual(pageErrors, []);
     });
@@ -498,15 +539,18 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
 // ---------------------------------------------------------------------------------------------------------------
 // An API that wraps every response: { success, data, meta } (test/fixtures/wrapped.yaml)
 
-describe('generated dashboard for a wrapped API with login, row actions and a French YAML design', { timeout: 20 * 60_000 }, () => {
+describe('generated dashboard for a wrapped API with login, permissions, row actions and a French/English YAML design', { timeout: 20 * 60_000 }, () => {
     let server: ChildProcess | undefined;
     let browser: Browser | undefined;
     let page: Page;
     let baseUrl = '';
     const pageErrors: string[] = [];
-    let users: Array<{ id: number; name: string; nickname?: string; active?: boolean }> = [];
+    let users: Array<{ id: number; name: string; nickname?: string; roleId?: number; active?: boolean }> = [];
     let roles: Array<{ id: number; name: string; description?: string; permissions: string[] }> = [];
     let lastBody: unknown = null;
+    // Tokens the API accepts; a refresh replaces them
+    let validTokens = new Set<string>();
+    let refreshCount = 0;
     const requests: Array<{ method: string; path: string; query: Record<string, string>; authorization?: string }> = [];
 
     const envelope = (data: unknown, extra: Record<string, unknown> = {}) => ({ json: { success: true, data, ...extra } });
@@ -520,25 +564,54 @@ describe('generated dashboard for a wrapped API with login, row actions and a Fr
         const userMatch = url.pathname.match(/^\/api\/users\/(\d+)$/);
         const roleMatch = url.pathname.match(/^\/api\/roles\/(\d+)$/);
         const actionMatch = url.pathname.match(/^\/api\/users\/(\d+)\/(status|reset-password)$/);
+        const sessionsMatch = url.pathname.match(/^\/api\/users\/(\d+)\/sessions$/);
 
         if (url.pathname === '/api/auth/login' && method === 'POST') {
             const { email, password } = request.postDataJSON() as { email: string; password: string };
             if (password !== 'secret') return route.fulfill({ status: 401, json: { success: false, message: 'Mot de passe incorrect' } });
-            return route.fulfill(envelope({ token: `token-for-${email}` }));
+            const token = `token-for-${email}`;
+            validTokens.add(token);
+            const admin = email.startsWith('admin');
+            return route.fulfill(
+                envelope({
+                    token,
+                    refreshToken: `refresh-for-${email}`,
+                    permissions: admin ? ['*'] : ['users.read'],
+                    user: { id: 99, name: admin ? 'Admin' : 'Viewer' },
+                })
+            );
         }
-        // Everything else needs the token the login returned
-        if (request.headers()['authorization'] !== 'Bearer token-for-admin@example.com') {
+        if (url.pathname === '/api/auth/refresh' && method === 'POST') {
+            const { refreshToken } = request.postDataJSON() as { refreshToken: string };
+            refreshCount++;
+            const token = `${refreshToken.replace('refresh-for-', 'token-for-')}-${refreshCount}`;
+            validTokens.add(token);
+            return route.fulfill(envelope({ token, refreshToken }));
+        }
+        // Everything else needs a token the API handed out
+        const token = request.headers()['authorization']?.replace(/^Bearer /, '');
+        if (!token || !validTokens.has(token)) {
             return route.fulfill({ status: 401, json: { success: false, message: 'Unauthorized' } });
+        }
+        if (url.pathname === '/api/auth/logout' && method === 'POST') {
+            validTokens.delete(token);
+            return route.fulfill({ status: 204 });
         }
         if (url.pathname === '/api/users' && method === 'GET') {
             const limit = Number(query.limit);
             const pageNumber = Number(query.page);
-            return route.fulfill(envelope(users.slice((pageNumber - 1) * limit, pageNumber * limit), { meta: { total: users.length, page: pageNumber } }));
+            let rows = users;
+            if (query.roleId) rows = rows.filter(user => String(user.roleId) === query.roleId);
+            if (query.active) rows = rows.filter(user => String(!!user.active) === query.active);
+            return route.fulfill(envelope(rows.slice((pageNumber - 1) * limit, pageNumber * limit), { meta: { total: rows.length, page: pageNumber } }));
         }
         if (url.pathname === '/api/users' && method === 'POST') {
             lastBody = request.postDataJSON();
-            // Some APIs report failures with HTTP 200 and success: false
-            return route.fulfill({ json: { success: false, message: 'Name already taken' } });
+            // Some APIs report failures with HTTP 200 and success: false, with messages per field
+            return route.fulfill({ json: { success: false, message: 'Name already taken', errors: { name: ['Ce nom est déjà pris'] } } });
+        }
+        if (sessionsMatch && method === 'GET') {
+            return route.fulfill(envelope([{ id: 1, device: 'Firefox on Linux', lastSeen: '2026-03-01T08:00:00Z' }]));
         }
         if (userMatch && method === 'GET') return route.fulfill(envelope(users.find(user => user.id === Number(userMatch[1]))));
         if (userMatch && method === 'PUT') {
@@ -560,16 +633,26 @@ describe('generated dashboard for a wrapped API with login, row actions and a Fr
             lastBody = request.postDataJSON();
             return route.fulfill(envelope(roles.find(role => role.id === Number(roleMatch[1]))));
         }
+        if (url.pathname === '/api/events' && method === 'GET') return route.fulfill({ json: [] });
         return route.fulfill({ status: 404, json: { success: false, message: `No mock for ${method} ${url.pathname}` } });
     }
 
     before(async () => {
-        installApp();
+        await installApp();
         // Design from a YAML file, as a developer would write it
         const design = await loadConfig(path.join(ROOT, 'test', 'fixtures', 'wrapped.design.yaml'));
         await generateInto('wrapped.yaml', { ui: design.ui });
-        users = Array.from({ length: 25 }, (_, i) => ({ id: i + 1, name: `User ${String(i + 1).padStart(2, '0')}`, nickname: `nick${i + 1}`, active: i % 2 === 0 }));
-        roles = [{ id: 1, name: 'Editor', description: 'Can edit', permissions: ['users.read'] }];
+        users = Array.from({ length: 25 }, (_, i) => ({
+            id: i + 1,
+            name: `User ${String(i + 1).padStart(2, '0')}`,
+            nickname: `nick${i + 1}`,
+            roleId: i % 5 === 0 ? 2 : 1,
+            active: i % 2 === 0,
+        }));
+        roles = [
+            { id: 1, name: 'Editor', description: 'Can edit', permissions: ['users.read'] },
+            { id: 2, name: 'Owner', description: 'Owns everything', permissions: ['users.read', 'users.write'] },
+        ];
     });
 
     after(async () => {
@@ -582,12 +665,20 @@ describe('generated dashboard for a wrapped API with login, row actions and a Fr
     it('builds and serves', async () => {
         ({ server, baseUrl } = await buildAndServe());
         browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
-        page = await browser.newPage();
+        // A French browser, so the dashboard starts in the design's default language
+        page = await browser.newPage({ locale: 'fr-FR' });
         page.on('pageerror', error => pageErrors.push(error.message));
         await page.route('**/api/**', handleWrapped);
     });
 
     const mainText = async () => (await page.locator('main').innerText()).replace(/\s+/g, ' ');
+    const signIn = async (email: string) => {
+        await page.goto(`${baseUrl}/login`);
+        await page.locator('input[name=email]').fill(email);
+        await page.locator('input[name=password]').fill('secret');
+        await page.getByRole('button', { name: 'Se connecter' }).click();
+        await page.waitForURL(`${baseUrl}/`);
+    };
 
     it('sends signed-out visitors to the login page and signs in', async () => {
         await page.goto(`${baseUrl}/users`);
@@ -603,53 +694,82 @@ describe('generated dashboard for a wrapped API with login, row actions and a Fr
 
         await page.locator('input[name=password]').fill('secret');
         await page.getByRole('button', { name: 'Se connecter' }).click();
-        // Signed in, "/" opens the first resource of the sidebar, which the design puts first: roles
-        await page.waitForURL(`${baseUrl}/roles`);
-        await page.getByText('Editor').waitFor();
+        // Signed in: the home page, with a card per resource
+        await page.waitForURL(`${baseUrl}/`);
+        await page.locator('main a', { hasText: 'Utilisateurs' }).getByText('25').waitFor();
         assert.equal(requests.at(-1)?.authorization, 'Bearer token-for-admin@example.com');
+        await page.getByText('Connecté en tant que Admin').waitFor();
     });
 
-    it('shows the title, French labels, the design and the custom primary color', async () => {
+    it('shows the title, French labels, icons, the design and the custom primary color', async () => {
         await page.goto(`${baseUrl}/users`);
         await page.getByText('User 01').waitFor();
-        await page.getByText('Mon back-office').first().waitFor();
+        await page.locator('aside').getByText('Mon back-office').waitFor();
         await page.getByText("Comptes des personnes qui utilisent l'application.").waitFor();
         const headers = (await page.locator('thead').innerText()).replace(/\s+/g, ' ').trim();
-        assert.equal(headers, 'Name Surnom Active Actions', 'only the columns the design lists, with its labels');
+        assert.equal(headers, 'Name Surnom Rôle Active Actions', 'only the columns the design lists, with its labels');
         const nav = (await page.locator('aside nav').innerText()).replace(/\s+/g, ' ').trim();
-        assert.equal(nav, 'Roles Utilisateurs Events', 'sidebar in ui.nav order; teams hidden');
+        assert.equal(nav, 'Accueil Roles Utilisateurs Events', 'home first, then the sidebar in ui.nav order; teams hidden');
+        assert.equal(await page.locator('aside nav svg').count(), 3, 'icons for home, roles and users');
         assert.match(await mainText(), /Page 1 sur 3/);
         assert.ok(await page.getByRole('link', { name: 'Ajouter' }).isVisible());
         const primary = await page.evaluate('getComputedStyle(document.documentElement).getPropertyValue("--primary").trim()');
         assert.equal(primary, '#16a34a');
     });
 
-    it('lists rows from the envelope and reads the total from meta.total', async () => {
+    it('lists rows from the envelope, reads the total from meta.total and shows role names', async () => {
         assert.equal((await mainText()).match(/User \d+/g)?.length, 10);
         assert.deepEqual(requests.filter(request => request.path === '/api/users').at(-1)?.query, { page: '1', limit: '10' });
+        const firstRow = (await page.locator('tbody tr').first().innerText()).replace(/\s+/g, ' ');
+        assert.match(firstRow, /User 01 nick1 Owner Oui/);
     });
 
-    it('prefills the edit form from the wrapped record and saves it', async () => {
-        await page.goto(`${baseUrl}/users/3`);
+    it('filters by role and status', async () => {
+        await page.getByRole('combobox', { name: 'Rôle' }).selectOption({ label: 'Owner' });
+        await page.getByText('Page 1 sur 1').waitFor();
+        assert.equal((await mainText()).match(/User \d+/g)?.length, 5);
+        await page.getByRole('combobox', { name: 'Active' }).selectOption({ label: 'Oui' });
+        await page.waitForFunction('document.querySelectorAll("tbody tr").length === 3');
+        assert.deepEqual(requests.filter(request => request.path === '/api/users').at(-1)?.query, { page: '1', limit: '10', roleId: '2', active: 'true' });
+        await page.getByRole('button', { name: 'Effacer les filtres' }).click();
+        await page.getByText('Page 1 sur 3').waitFor();
+    });
+
+    it('shows a user with its sessions in a tab', async () => {
+        await page.getByRole('link', { name: 'User 03' }).click();
+        await page.waitForURL(`${baseUrl}/users/3`);
+        await page.getByText('Firefox on Linux').waitFor();
+        assert.match((await page.locator('dl').innerText()).replace(/\s+/g, ' '), /Rôle Editor/);
+    });
+
+    it('prefills the edit form from the wrapped record, with the role picked from the roles, and saves it', async () => {
+        await page.goto(`${baseUrl}/users/3/edit`);
         await page.locator('input[name=name]').waitFor();
         assert.equal(await page.locator('input[name=name]').inputValue(), 'User 03');
         assert.equal(await page.locator('input[name=nickname]').inputValue(), 'nick3');
+        await page.locator('select[name=roleId] option', { hasText: 'Owner' }).waitFor({ state: 'attached' });
+        assert.equal(await page.locator('select[name=roleId]').inputValue(), '1');
 
         await page.locator('input[name=nickname]').fill('third');
+        await page.locator('select[name=roleId]').selectOption({ label: 'Owner' });
         await page.getByRole('button', { name: 'Enregistrer' }).click();
-        await page.waitForURL(`${baseUrl}/users`);
-        assert.deepEqual(lastBody, { name: 'User 03', nickname: 'third', active: true });
+        await page.waitForURL(`${baseUrl}/users/3`);
+        assert.deepEqual(lastBody, { name: 'User 03', nickname: 'third', roleId: 2, active: true });
     });
 
-    it('edits roles with the fields of the update body only', async () => {
-        await page.goto(`${baseUrl}/roles/1`);
+    it('edits roles with the fields of the update body only, and lists their users', async () => {
+        await page.goto(`${baseUrl}/roles/1/edit`);
         await page.locator('input[name=name]').waitFor();
         assert.equal(await page.locator('input[name=description]').inputValue(), 'Can edit');
         assert.equal(await page.getByText('Permissions').count(), 0, 'PATCH /roles/{id} does not accept permissions');
         await page.locator('input[name=description]').fill('Edits users');
         await page.getByRole('button', { name: 'Enregistrer' }).click();
-        await page.waitForURL(`${baseUrl}/roles`);
+        await page.waitForURL(`${baseUrl}/roles/1`);
         assert.deepEqual(lastBody, { name: 'Editor', description: 'Edits users' });
+        // Users can be filtered by role, so the role page lists its users
+        await page.getByRole('tab', { name: 'Utilisateurs' }).waitFor();
+        await page.getByText('User 02').waitFor();
+        assert.equal(requests.filter(request => request.path === '/api/users').at(-1)?.query.roleId, '1');
 
         await page.goto(`${baseUrl}/roles/create`);
         await page.getByText('Permissions').waitFor();
@@ -674,29 +794,58 @@ describe('generated dashboard for a wrapped API with login, row actions and a Fr
         assert.ok(requests.some(request => request.method === 'POST' && request.path === '/api/users/1/reset-password'));
     });
 
-    it('treats success: false as an error and shows its message', async () => {
+    it('treats success: false as an error and shows its messages, per field too', async () => {
         await page.goto(`${baseUrl}/users/create`);
         await page.locator('input[name=name]').fill('Taken');
         await page.getByRole('button', { name: 'Créer' }).click();
         await page.getByText('Name already taken').waitFor();
+        await page.locator('form').getByText('Ce nom est déjà pris').waitFor();
         assert.equal(new URL(page.url()).pathname, '/users/create', 'stays on the form');
     });
 
     it('deletes through a status-only response', async () => {
         await page.goto(`${baseUrl}/users`);
         await page.getByText('User 01').waitFor();
-        await page.getByRole('button', { name: 'Supprimer' }).first().click();
+        await page.getByRole('button', { name: 'Supprimer', exact: true }).first().click();
         await page.getByRole('alertdialog').getByRole('button', { name: 'Supprimer' }).click();
         await page.getByText('Utilisateur : supprimé').waitFor();
         await page.getByText('User 11').waitFor();
         assert.ok(!users.some(user => user.id === 1));
     });
 
-    it('signs out', async () => {
+    it('refreshes an expired token once and retries', async () => {
+        validTokens = new Set();
+        await page.goto(`${baseUrl}/users`);
+        await page.getByText('User 02').waitFor();
+        assert.ok(requests.some(request => request.path === '/api/auth/refresh'));
+        assert.match(requests.filter(request => request.path === '/api/users').at(-1)?.authorization ?? '', /^Bearer token-for-admin@example\.com-\d+$/);
+        assert.equal(new URL(page.url()).pathname, '/users', 'still signed in');
+    });
+
+    it('switches to English', async () => {
+        await page.locator('aside').getByRole('combobox', { name: 'Langue' }).selectOption('en');
+        await page.getByRole('link', { name: 'Add new' }).waitFor();
+        const nav = (await page.locator('aside nav').innerText()).replace(/\s+/g, ' ').trim();
+        assert.equal(nav, 'Home Roles Users Events', 'built-in strings and translated labels');
+        await page.getByText('Accounts of the people who use the app.').waitFor();
+        await page.locator('aside').getByRole('combobox', { name: 'Language' }).selectOption('fr');
+        await page.getByRole('link', { name: 'Ajouter' }).waitFor();
+    });
+
+    it('signs out on the server too', async () => {
         await page.getByRole('button', { name: 'Se déconnecter' }).click();
         await page.waitForURL(`${baseUrl}/login`);
+        assert.ok(requests.some(request => request.method === 'POST' && request.path === '/api/auth/logout'));
         await page.goto(`${baseUrl}/users`);
         await page.waitForURL(`${baseUrl}/login`);
+    });
+
+    it('hides what the signed-in user may not do', async () => {
+        await signIn('viewer@example.com');
+        await page.goto(`${baseUrl}/users`);
+        await page.getByText('User 02').waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Supprimer', exact: true }).count(), 0, 'DELETE /users/{id} needs users.delete');
+        assert.ok(await page.getByRole('link', { name: 'Modifier' }).first().isVisible());
     });
 
     it('had no uncaught errors in the page', () => {

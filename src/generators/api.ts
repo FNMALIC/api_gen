@@ -158,7 +158,8 @@ function unwrap<T>(envelope: object, key: string | null): T {
     const body = envelope as Record<string, unknown>;
     if (body.success === false || body.ok === false) {
         const message = body.message ?? body.error;
-        throw new Error(typeof message === "string" && message ? message : "Request failed");
+        // Keep the body, like axios errors do, so validation messages per field can be read from it
+        throw Object.assign(new Error(typeof message === "string" && message ? message : "Request failed"), { response: { status: 200, data: body } });
     }
     return (key === null ? body : body[key]) as T;
 }`;

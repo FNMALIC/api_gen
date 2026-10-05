@@ -50,6 +50,24 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "published"
+              ]
+            }
+          },
+          {
+            "name": "categoryId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
             "name": "X-Request-Id",
             "in": "header",
             "schema": {
@@ -482,6 +500,14 @@
               "draft",
               "published"
             ]
+          },
+          "categoryId": {
+            "type": "integer",
+            "description": "Category of the product"
+          },
+          "imageUrl": {
+            "type": "string",
+            "format": "uri"
           },
           "description": {
             "type": "string",

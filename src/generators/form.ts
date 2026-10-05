@@ -1,21 +1,37 @@
 import { HEADER } from './api.ts';
 import { humanize, propertyKey } from '../helpers.ts';
-import { fill, type Ui } from '../ui.ts';
-import type { Field } from '../model.ts';
+import { isMultiLocale, type Ui } from '../ui.ts';
+import { Imports, i18nImport, importComponent, listHookCall, referenceSource } from './shared.ts';
+import type { Field, Model } from '../model.ts';
 import type { Router } from './dashboard.ts';
 
 export const FIELDS_IMPORT = '@/components/api-gen/fields';
 export const FORM_IMPORT = '@/components/api-gen/form';
 export const DIALOG_IMPORT = '@/components/api-gen/dialog';
+export const I18N_IMPORT = '@/components/api-gen/i18n';
 
 /**
  * What kind of input a schema field gets:
- * file, enum, number, boolean, datetime, string, enumList, list, object (nested fieldset) or json (textarea)
+ * file, enum, number, boolean, datetime, string, enumList, list, reference (select from another resource),
+ * referenceList (checkboxes), object (nested fieldset) or json (textarea)
  */
-export type FieldKind = 'file' | 'enum' | 'number' | 'boolean' | 'datetime' | 'string' | 'enumList' | 'list' | 'object' | 'json';
+export type FieldKind =
+    | 'file'
+    | 'enum'
+    | 'number'
+    | 'boolean'
+    | 'datetime'
+    | 'string'
+    | 'enumList'
+    | 'list'
+    | 'reference'
+    | 'referenceList'
+    | 'object'
+    | 'json';
 
 export function fieldKind(field: Field): FieldKind {
     if (field.type === 'string' && field.format === 'binary') return 'file';
+    if (field.reference) return field.reference.many ? 'referenceList' : 'reference';
     if (field.enum && field.enum.length > 0 && field.type !== 'array') return 'enum';
     if (field.type === 'integer' || field.type === 'number') return 'number';
     if (field.type === 'boolean') return 'boolean';
@@ -32,7 +48,7 @@ export const editable = (fields: Field[] | null | undefined): Field[] =>
     (fields || []).filter(field => !field.readOnly && !(field.hidden && field.hidden.form));
 
 const isNumericEnum = (field: Field) => (field.enum ?? []).every(value => typeof value === 'number');
-const optionLabel = (value: unknown) => humanize(String(value)) || String(value);
+const optionLabel = (ui: Ui, value: unknown) => ui.label(humanize(String(value)) || String(value));
 
 // "optional" fields also accept null: APIs commonly return null for fields they don't require
 function optionality(field: Field, expression: string): string {
@@ -41,10 +57,9 @@ function optionality(field: Field, expression: string): string {
 }
 
 function zodType(field: Field, ui: Ui): string {
-    const s = ui.strings;
-    const label = field.label;
-    const lower = label.toLowerCase();
-    const required = JSON.stringify(fill(s.required, { label }));
+    const label = ui.labelValue(field.label);
+    const lower = ui.lower(field.label);
+    const required = ui.t('required', { label });
     switch (fieldKind(field)) {
         case 'file':
             return optionality(field, `z.union([z.instanceof(File), z.string()], { message: ${required} })`);
@@ -55,27 +70,36 @@ function zodType(field: Field, ui: Ui): string {
                     ? `z.union([${(field.enum ?? []).map(value => `z.literal(${value})`).join(', ')}], { message: ${required} })`
                     : `z.enum([${(field.enum ?? []).map(value => JSON.stringify(String(value))).join(', ')}], { message: ${required} })`
             );
+        case 'reference':
+            if (field.type === 'string') {
+                return optionality(field, `z.string({ message: ${required} })${field.required ? `.min(1, ${required})` : ''}`);
+            }
+            return optionality(field, `z.number({ message: ${required} })`);
+        case 'referenceList': {
+            const item = field.items?.type === 'string' ? 'z.string()' : 'z.number()';
+            return `z.array(${item})${field.required ? `.min(1, ${ui.t('selectAtLeastOne', { label: lower })})` : ''}`;
+        }
         case 'number':
-            return optionality(field, `z.number({ message: ${JSON.stringify(fill(s.notANumber, { label }))} })${field.type === 'integer' ? '.int()' : ''}`);
+            return optionality(field, `z.number({ message: ${ui.t('notANumber', { label })} })${field.type === 'integer' ? '.int()' : ''}`);
         case 'boolean':
             return optionality(field, 'z.boolean()');
         case 'datetime':
         case 'string': {
             let type = `z.string({ message: ${required} })`;
             if (field.required) type += `.min(1, ${required})`;
-            if (field.format === 'email') type += `.email(${JSON.stringify(s.invalidEmail)})`;
-            if (field.format === 'uri') type += `.url(${JSON.stringify(s.invalidUrl)})`;
+            if (field.format === 'email') type += `.email(${ui.t('invalidEmail')})`;
+            if (field.format === 'uri') type += `.url(${ui.t('invalidUrl')})`;
             // A cleared optional input holds "", which must pass validation (it is dropped on submit)
             if (!field.required && (field.format === 'email' || field.format === 'uri')) type += '.or(z.literal(""))';
             return optionality(field, type);
         }
         case 'enumList': {
             const values = (field.items?.enum ?? []).map(value => JSON.stringify(String(value))).join(', ');
-            return `z.array(z.enum([${values}]))${field.required ? `.min(1, ${JSON.stringify(fill(s.selectAtLeastOne, { label: lower }))})` : ''}`;
+            return `z.array(z.enum([${values}]))${field.required ? `.min(1, ${ui.t('selectAtLeastOne', { label: lower })})` : ''}`;
         }
         case 'list': {
             const item = field.items?.type === 'string' ? 'z.string()' : 'z.number()';
-            return `z.array(${item})${field.required ? `.min(1, ${JSON.stringify(fill(s.addAtLeastOne, { label: lower }))})` : ''}`;
+            return `z.array(${item})${field.required ? `.min(1, ${ui.t('addAtLeastOne', { label: lower })})` : ''}`;
         }
         case 'object': {
             const children = editable(field.properties);
@@ -90,7 +114,7 @@ function zodType(field: Field, ui: Ui): string {
             if (requiredChildren.length === 0) return type;
             const checks = requiredChildren.map(child => {
                 const key = JSON.stringify(child.name);
-                return `if (isBlank(value[${key}])) ctx.addIssue({ code: "custom", path: [${key}], message: ${JSON.stringify(fill(s.required, { label: child.label }))} });`;
+                return `if (isBlank(value[${key}])) ctx.addIssue({ code: "custom", path: [${key}], message: ${ui.t('required', { label: ui.labelValue(child.label) })} });`;
             });
             return `${type}.superRefine((value, ctx) => {
                 if (!value || Object.values(value).every(isBlank)) return;
@@ -98,7 +122,7 @@ function zodType(field: Field, ui: Ui): string {
             })`;
         }
         default: {
-            let type = `z.unknown().refine((value) => value !== INVALID_JSON, { message: ${JSON.stringify(s.invalidJson)} })`;
+            let type = `z.unknown().refine((value) => value !== INVALID_JSON, { message: ${ui.t('invalidJson')} })`;
             if (field.required) type += `.refine((value) => value !== undefined, { message: ${required} })`;
             return type;
         }
@@ -114,6 +138,7 @@ function defaultValue(field: Field): string {
             return '""';
         case 'enumList':
         case 'list':
+        case 'referenceList':
             return '[]';
         case 'object':
             // Optional objects start empty so their required children only apply once one is filled in
@@ -126,12 +151,20 @@ function defaultValue(field: Field): string {
 
 const isPassword = (field: Field) => field.format === 'password' || /^(password|pass|passwd|pwd|secret)$/i.test(field.name);
 
-function control(field: Field, path: string, ui: Ui): string {
+/** What a form file needs besides its controls: hooks for reference options, custom components */
+interface FormContext {
+    ui: Ui;
+    models: Model[];
+    imports: Imports;
+    /** Option variables per component, e.g. roleNameOptions -> useOptions(useRoles(...).data, "id", "name") */
+    options: Map<string, string>;
+}
+
+function control(field: Field, path: string, context: FormContext): string {
+    const { ui } = context;
     const name = JSON.stringify(path);
-    const label = field.label;
-    const description = field.description
-        ? `\n<FormDescription>${String(field.description).replace(/[{}<>]/g, '')}</FormDescription>`
-        : '';
+    const label = `{${ui.label(field.label)}}`;
+    const description = field.description ? `\n<FormDescription>{${ui.label(String(field.description))}}</FormDescription>` : '';
     const item = (inner: string, className = '') => `
 <FormField
     control={form.control}
@@ -147,6 +180,13 @@ function control(field: Field, path: string, ui: Ui): string {
             <FormControl>
                 ${input}
             </FormControl>`;
+    const selectPlaceholder = ui.t('selectPlaceholder', { label: ui.lower(field.label) });
+
+    // Your own input component, from the design file
+    if (field.component) {
+        const Component = importComponent(context.imports, field.component);
+        return item(labelled(`<${Component} name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} />`));
+    }
 
     switch (fieldKind(field)) {
         case 'boolean':
@@ -158,42 +198,60 @@ function control(field: Field, path: string, ui: Ui): string {
                 'flex flex-row items-center gap-3'
             );
         case 'enum': {
-            const options = (field.enum ?? []).map(value => `{ value: ${JSON.stringify(value)}, label: ${JSON.stringify(optionLabel(value))} }`).join(', ');
-            const placeholder = JSON.stringify(fill(ui.strings.selectPlaceholder, { label: label.toLowerCase() }));
+            const options = (field.enum ?? []).map(value => `{ value: ${JSON.stringify(value)}, label: ${optionLabel(ui, value)} }`).join(', ');
             return item(
                 labelled(
-                    `<NativeSelect name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} placeholder={${placeholder}} options={[${options}]} />`
+                    `<NativeSelect name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} placeholder={${selectPlaceholder}} options={[${options}]} />`
+                )
+            );
+        }
+        case 'reference':
+        case 'referenceList': {
+            const reference = field.reference!;
+            const source = referenceSource(context.models, reference, 'Options');
+            if (!source) return item(labelled(`<Input {...field} value={field.value ?? ""} />`));
+            context.imports.add(source.importPath, source.hook);
+            context.options.set(
+                source.variable,
+                `useOptions(${listHookCall(source.model)}.data, ${JSON.stringify(reference.idKey)}, ${JSON.stringify(reference.display)})`
+            );
+            if (reference.many) {
+                return item(labelled(`<CheckboxGroup options={${source.variable}} value={field.value} onChange={field.onChange} />`));
+            }
+            return item(
+                labelled(
+                    `<NativeSelect name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} placeholder={${selectPlaceholder}} options={${source.variable}} />`
                 )
             );
         }
         case 'number':
             return item(labelled(`<Input
                     type="number"${field.placeholder ? `
-                    placeholder={${JSON.stringify(field.placeholder)}}` : ''}
+                    placeholder={${ui.label(field.placeholder)}}` : ''}
                     {...field}
                     value={field.value ?? ""}
                     onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.valueAsNumber)}
                 />`));
         case 'datetime':
-            if (field.widget && field.widget !== 'datetime') return textControl(field, item, labelled);
+            if (field.widget && field.widget !== 'datetime') return textControl(field, item, labelled, ui);
             return item(labelled('<DateTimeInput name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} />'));
         case 'file':
             return item(labelled('<FileInput name={field.name} onChange={field.onChange} onBlur={field.onBlur} />'));
         case 'enumList': {
-            const options = (field.items?.enum ?? []).map(value => `{ value: ${JSON.stringify(String(value))}, label: ${JSON.stringify(optionLabel(value))} }`).join(', ');
+            const options = (field.items?.enum ?? []).map(value => `{ value: ${JSON.stringify(String(value))}, label: ${optionLabel(ui, value)} }`).join(', ');
             return item(labelled(`<CheckboxGroup options={[${options}]} value={field.value} onChange={field.onChange} />`));
         }
         case 'list':
             return item(
                 labelled(
-                    `<ListInput type="${field.items?.type === 'string' ? 'text' : 'number'}" value={field.value} onChange={field.onChange} placeholder={${JSON.stringify(ui.strings.listPlaceholder)}} removeLabel={${JSON.stringify(ui.strings.remove)}} />`
+                    `<ListInput type="${field.items?.type === 'string' ? 'text' : 'number'}" value={field.value} onChange={field.onChange} placeholder={${ui.t('listPlaceholder')}} removeLabel={${ui.t('remove')}} />`
                 )
             );
         case 'object':
             return `
 <fieldset className="space-y-4 rounded-md border p-4">
     <legend className="px-1 text-sm font-medium">${label}</legend>
-    ${editable(field.properties).map(child => control(child, `${path}.${child.name}`, ui)).join('\n')}
+    ${editable(field.properties).map(child => control(child, `${path}.${child.name}`, context)).join('\n')}
 </fieldset>`;
         case 'json':
             return item(labelled('<JsonInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} />'));
@@ -201,13 +259,13 @@ function control(field: Field, path: string, ui: Ui): string {
             if (field.widget === 'datetime') {
                 return item(labelled('<DateTimeInput name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} />'));
             }
-            return textControl(field, item, labelled);
+            return textControl(field, item, labelled, ui);
     }
 }
 
 // Text input, textarea or a typed input (password, email, ...), from the widget option or the schema format
-function textControl(field: Field, item: (inner: string) => string, labelled: (input: string) => string): string {
-    const placeholder = field.placeholder ? ` placeholder={${JSON.stringify(field.placeholder)}}` : '';
+function textControl(field: Field, item: (inner: string) => string, labelled: (input: string) => string, ui: Ui): string {
+    const placeholder = field.placeholder ? ` placeholder={${ui.label(field.placeholder)}}` : '';
     if (field.widget === 'textarea') {
         return item(labelled(`<Textarea rows={4}${placeholder} {...field} value={field.value ?? ""} />`));
     }
@@ -227,12 +285,18 @@ function needsIsBlank(fields: Field[] | undefined): boolean {
     );
 }
 
-// Collect the kinds used anywhere in the form, including nested fieldsets
+// Collect the kinds rendered anywhere in the form, including nested fieldsets (custom components aside)
 function kindsIn(fields: Field[] | undefined, kinds: Set<FieldKind> = new Set()): Set<FieldKind> {
     for (const field of editable(fields)) {
         const kind = fieldKind(field);
-        kinds.add(kind);
-        if (kind === 'object') kindsIn(field.properties, kinds);
+        if (kind === 'object') {
+            kinds.add(kind);
+            kindsIn(field.properties, kinds);
+        } else if (!field.component) {
+            kinds.add(kind);
+        }
+        // json validation uses INVALID_JSON even with a custom input
+        if (field.component && kind === 'json') kinds.add('json');
     }
     return kinds;
 }
@@ -241,6 +305,7 @@ function kindsIn(fields: Field[] | undefined, kinds: Set<FieldKind> = new Set())
 function inputsIn(fields: Field[] | undefined, inputs: Set<string>): Set<string> {
     for (const field of editable(fields)) {
         const kind = fieldKind(field);
+        if (field.component) continue;
         if (kind === 'object') inputsIn(field.properties, inputs);
         else if (kind === 'number') inputs.add('Input');
         else if (kind === 'string' || kind === 'datetime') {
@@ -263,32 +328,25 @@ export interface FormSpec {
 
 /**
  * A file with one react-hook-form + zod form component per spec. Each component takes
- * { defaultValues?, onSubmit, isSubmitting?, submitLabel } and exports its schema and values type.
+ * { defaultValues?, onSubmit, isSubmitting?, submitLabel, error? } and exports its schema and values type.
+ * error: the failed request; validation messages it holds per field are shown under the inputs.
  */
-export function generateFormFile(forms: FormSpec[], router: Router, ui: Ui): string {
+export function generateFormFile(forms: FormSpec[], router: Router, ui: Ui, models: Model[] = []): string {
     const kinds = new Set<FieldKind>();
     forms.forEach(form => kindsIn(form.fields, kinds));
     const anyIsBlank = forms.some(form => needsIsBlank(form.fields));
     const inputs = new Set<string>();
     forms.forEach(form => inputsIn(form.fields, inputs));
     const anyDescription = forms.some(form => hasDescription(form.fields));
-
-    const helperImports = [
-        inputs.has('DateTimeInput') && 'DateTimeInput',
-        kinds.has('file') && 'FileInput',
-        kinds.has('enumList') && 'CheckboxGroup',
-        kinds.has('list') && 'ListInput',
-        kinds.has('enum') && 'NativeSelect',
-        kinds.has('json') && 'JsonInput',
-        kinds.has('json') && 'INVALID_JSON',
-        anyIsBlank && 'isBlank',
-        'dropEmptyValues',
-    ].filter(Boolean);
-    const formImports = ['Form', 'FormControl', anyDescription && 'FormDescription', 'FormField', 'FormItem', 'FormLabel', 'FormMessage'].filter(Boolean);
+    const imports = new Imports();
+    const hasReferences = kinds.has('reference') || kinds.has('referenceList');
 
     const components = forms.map(({ component, fields: allFields }) => {
         const fields = editable(allFields);
         const schema = `${component.charAt(0).toLowerCase()}${component.slice(1)}Schema`;
+        const context: FormContext = { ui, models, imports, options: new Map() };
+        const controls = fields.map(field => control(field, field.name, context)).join('\n');
+        const optionLines = [...context.options].map(([variable, call]) => `\n    const ${variable} = ${call};`).join('');
         return `export const ${schema} = z.object({${fields.map(field => `
     ${propertyKey(field.name)}: ${zodType(field, ui)},`).join('')}
 });
@@ -299,18 +357,25 @@ const ${component}Empty = {${fields.map(field => `
     ${propertyKey(field.name)}: ${defaultValue(field)},`).join('')}
 };
 
-export function ${component}({ defaultValues, onSubmit, isSubmitting, submitLabel }: FormProps<${component}Values>) {
+export function ${component}({ defaultValues, onSubmit, isSubmitting, submitLabel, error }: FormProps<${component}Values>) {
     const form = useForm<${component}Values>({
         resolver: zodResolver(${schema}),
         defaultValues: { ...${component}Empty, ...defaultValues } as DefaultValues<${component}Values>,
-    });
+    });${optionLines}
+
+    // Validation messages from the server, e.g. { errors: { email: ["already taken"] } }
+    useEffect(() => {
+        for (const [name, message] of Object.entries(fieldErrors(error))) {
+            form.setError(name as FieldPath<${component}Values>, { type: "server", message });
+        }
+    }, [error, form]);
 
     return (
         <Form {...form}>
             <form onSubmit={form.handleSubmit((values) => onSubmit(dropEmptyValues(values)))} noValidate className="space-y-6">
-                ${fields.map(field => control(field, field.name, ui)).join('\n')}
+                ${controls}
                 <Button type="submit" disabled={isSubmitting}>
-                    {isSubmitting ? ${JSON.stringify(ui.strings.saving)} : submitLabel}
+                    {isSubmitting ? ${ui.t('saving')} : submitLabel}
                 </Button>
             </form>
         </Form>
@@ -318,15 +383,32 @@ export function ${component}({ defaultValues, onSubmit, isSubmitting, submitLabe
 }`;
     });
 
-    return `${router.directive}${HEADER}import { useForm, type DefaultValues } from "react-hook-form";
+    const helperImports = [
+        inputs.has('DateTimeInput') && 'DateTimeInput',
+        kinds.has('file') && 'FileInput',
+        (kinds.has('enumList') || kinds.has('referenceList')) && 'CheckboxGroup',
+        kinds.has('list') && 'ListInput',
+        (kinds.has('enum') || kinds.has('reference')) && 'NativeSelect',
+        kinds.has('json') && 'JsonInput',
+        kinds.has('json') && 'INVALID_JSON',
+        anyIsBlank && 'isBlank',
+        hasReferences && 'useOptions',
+        'dropEmptyValues',
+        'fieldErrors',
+    ].filter(Boolean);
+    const formImports = ['Form', 'FormControl', anyDescription && 'FormDescription', 'FormField', 'FormItem', 'FormLabel', 'FormMessage'].filter(Boolean);
+    const extra = imports.toString();
+
+    return `${router.directive}${HEADER}import { useEffect } from "react";
+import { useForm, type DefaultValues, type FieldPath } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";${inputs.has('Input') ? `
+import { Button } from "@/components/ui/button";${inputs.has('Input') || hasReferences ? `
 import { Input } from "@/components/ui/input";` : ''}${kinds.has('boolean') ? `
 import { Checkbox } from "@/components/ui/checkbox";` : ''}${inputs.has('Textarea') ? `
 import { Textarea } from "@/components/ui/textarea";` : ''}
 import { ${formImports.join(', ')} } from "${FORM_IMPORT}";
-import { ${helperImports.join(', ')} } from "${FIELDS_IMPORT}";
+import { ${helperImports.join(', ')} } from "${FIELDS_IMPORT}";${i18nImport(ui, components.join('\n'))}${extra ? `\n${extra}` : ''}
 
 interface FormProps<Values> {
     /** Initial values, e.g. the record being edited. Properties outside the schema are dropped on submit. */
@@ -334,6 +416,8 @@ interface FormProps<Values> {
     onSubmit: (values: Values) => void;
     isSubmitting?: boolean;
     submitLabel: string;
+    /** The failed request, to show the server's validation messages under the fields */
+    error?: unknown;
 }
 
 ${components.join('\n\n')}
@@ -417,7 +501,8 @@ export function FormMessage({ className, ...props }: ComponentProps<"p">) {
 export function generateDialogComponent(ui: Ui): string {
     return `"use client";
 ${HEADER}import { useEffect, useId, useRef, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";${isMultiLocale(ui) ? `
+import { t } from "./i18n";` : ''}
 
 export function Dialog({
     open,
@@ -476,7 +561,7 @@ export function ConfirmDialog({
     onConfirm,
     title,
     description,
-    confirmLabel = ${JSON.stringify(ui.strings.confirm)},
+    confirmLabel = ${ui.t('confirm')},
     destructive = false,
     pending = false,
 }: {
@@ -493,7 +578,7 @@ export function ConfirmDialog({
         <Dialog open={open} onClose={onClose} title={title} description={description} role="alertdialog">
             <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={onClose}>
-                    {${JSON.stringify(ui.strings.cancel)}}
+                    {${ui.t('cancel')}}
                 </Button>
                 <Button type="button" variant={destructive ? "destructive" : "default"} disabled={pending} onClick={onConfirm}>
                     {confirmLabel}
@@ -501,289 +586,6 @@ export function ConfirmDialog({
             </div>
         </Dialog>
     );
-}
-`;
-}
-
-// components/api-gen/fields.tsx: inputs shadcn/ui doesn't ship, plus table and multipart helpers
-export function generateFieldsComponent(ui: Ui): string {
-    const s = ui.strings;
-    return `"use client";
-${HEADER}import { useState, type ComponentProps, type KeyboardEvent } from "react";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-
-/** Marker stored while a JsonInput holds text that isn't valid JSON, so validation can reject it */
-export const INVALID_JSON = "__api_gen_invalid_json__";
-
-/** Free-form list of strings or numbers: type a value, then press Enter or comma */
-export function ListInput({
-    value,
-    onChange,
-    type = "text",
-    placeholder = ${JSON.stringify(s.listPlaceholder)},
-    removeLabel = ${JSON.stringify(s.remove)},
-    id,
-}: {
-    value?: Array<string | number> | null;
-    onChange: (value: Array<string | number>) => void;
-    type?: "text" | "number";
-    placeholder?: string;
-    removeLabel?: string;
-    id?: string;
-}) {
-    const [draft, setDraft] = useState("");
-    const items = value ?? [];
-
-    const add = () => {
-        const text = draft.trim();
-        if (!text) return;
-        const item = type === "number" ? Number(text) : text;
-        if (typeof item === "number" && Number.isNaN(item)) return;
-        onChange([...items, item]);
-        setDraft("");
-    };
-
-    const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key === "Enter" || event.key === ",") {
-            event.preventDefault();
-            add();
-        }
-    };
-
-    return (
-        <div className="space-y-2">
-            {items.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                    {items.map((item, index) => (
-                        <span key={\`\${item}-\${index}\`} className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-sm">
-                            {String(item)}
-                            <button
-                                type="button"
-                                aria-label={\`\${removeLabel} \${item}\`}
-                                className="text-muted-foreground hover:text-foreground"
-                                onClick={() => onChange(items.filter((_, i) => i !== index))}
-                            >
-                                ×
-                            </button>
-                        </span>
-                    ))}
-                </div>
-            )}
-            <Input
-                id={id}
-                type={type}
-                value={draft}
-                placeholder={placeholder}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={onKeyDown}
-                onBlur={add}
-            />
-        </div>
-    );
-}
-
-/** Multiple choice for arrays of enum values */
-export function CheckboxGroup({
-    options,
-    value,
-    onChange,
-    id,
-}: {
-    options: { value: string; label: string }[];
-    value?: string[] | null;
-    onChange: (value: string[]) => void;
-    id?: string;
-}) {
-    const selected = value ?? [];
-    return (
-        <div id={id} role="group" className="flex flex-wrap gap-4">
-            {options.map((option) => (
-                <label key={option.value} className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                        checked={selected.includes(option.value)}
-                        onCheckedChange={(checked) =>
-                            onChange(checked === true ? [...selected, option.value] : selected.filter((v) => v !== option.value))
-                        }
-                    />
-                    {option.label}
-                </label>
-            ))}
-        </div>
-    );
-}
-
-/** Styled native select: works the same with every shadcn/ui setup and on mobile */
-export function NativeSelect({
-    value,
-    onChange,
-    options,
-    placeholder,
-    className,
-    ...props
-}: Omit<ComponentProps<"select">, "value" | "onChange"> & {
-    value?: string | number | null;
-    onChange: (value: string | number | undefined) => void;
-    options: { value: string | number; label: string }[];
-    placeholder?: string;
-}) {
-    const selected = value === null || value === undefined ? "" : String(value);
-    return (
-        <select
-            {...props}
-            value={selected}
-            onChange={(event) => {
-                const option = options.find((item) => String(item.value) === event.target.value);
-                onChange(option ? option.value : undefined);
-            }}
-            className={[
-                "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none",
-                "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                "aria-invalid:border-destructive dark:bg-input/30",
-                className,
-            ].filter(Boolean).join(" ")}
-        >
-            <option value="">{placeholder}</option>
-            {options.map((option) => (
-                <option key={String(option.value)} value={String(option.value)}>
-                    {option.label}
-                </option>
-            ))}
-        </select>
-    );
-}
-
-/** JSON editor for nested objects, maps and arrays of objects */
-export function JsonInput({ value, onChange, onBlur, id }: { value?: unknown; onChange: (value: unknown) => void; onBlur?: () => void; id?: string }) {
-    const [text, setText] = useState(() =>
-        value === undefined || value === null || value === INVALID_JSON ? "" : JSON.stringify(value, null, 2)
-    );
-
-    return (
-        <Textarea
-            id={id}
-            className="font-mono text-sm"
-            rows={4}
-            value={text}
-            onBlur={onBlur}
-            aria-invalid={value === INVALID_JSON}
-            onChange={(e) => {
-                setText(e.target.value);
-                if (e.target.value.trim() === "") return onChange(undefined);
-                try {
-                    onChange(JSON.parse(e.target.value));
-                } catch {
-                    onChange(INVALID_JSON);
-                }
-            }}
-        />
-    );
-}
-
-const pad = (n: number) => String(n).padStart(2, "0");
-
-// ISO date-time <-> the local "YYYY-MM-DDTHH:mm" format datetime-local inputs use
-function toLocalInput(value?: string | null) {
-    if (!value) return "";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    return \`\${date.getFullYear()}-\${pad(date.getMonth() + 1)}-\${pad(date.getDate())}T\${pad(date.getHours())}:\${pad(date.getMinutes())}\`;
-}
-
-/** Date-time picker that reads and writes ISO 8601 strings */
-export function DateTimeInput({
-    value,
-    onChange,
-    onBlur,
-    name,
-    id,
-}: {
-    value?: string | null;
-    onChange: (value: string | undefined) => void;
-    onBlur?: () => void;
-    name?: string;
-    id?: string;
-}) {
-    return (
-        <Input
-            id={id}
-            type="datetime-local"
-            name={name}
-            value={toLocalInput(value)}
-            onBlur={onBlur}
-            onChange={(e) => onChange(e.target.value ? new Date(e.target.value).toISOString() : undefined)}
-        />
-    );
-}
-
-/** File picker; the selected File is stored in the form */
-export function FileInput({
-    onChange,
-    onBlur,
-    name,
-    accept,
-    id,
-}: {
-    onChange: (file: File | undefined) => void;
-    onBlur?: () => void;
-    name?: string;
-    accept?: string;
-    id?: string;
-}) {
-    return <Input id={id} type="file" name={name} accept={accept} onBlur={onBlur} onChange={(e) => onChange(e.target.files?.[0])} />;
-}
-
-/** Build a multipart/form-data body: files as-is, arrays as repeated keys, objects as JSON */
-export function toFormData(values: object): FormData {
-    const data = new FormData();
-    const append = (key: string, value: unknown) => {
-        if (value === undefined || value === null) return;
-        if (value instanceof Blob) data.append(key, value);
-        else if (typeof value === "object") data.append(key, JSON.stringify(value));
-        else data.append(key, String(value));
-    };
-    for (const [key, value] of Object.entries(values)) {
-        if (Array.isArray(value)) value.forEach((item) => append(key, item));
-        else append(key, value);
-    }
-    return data;
-}
-
-/** True for values a user left empty: undefined, null, "" and [] */
-export function isBlank(value: unknown): boolean {
-    return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
-}
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-    value !== null && typeof value === "object" && !Array.isArray(value) && !(value instanceof Blob);
-
-/** Leave cleared optional inputs ("" and undefined) and nested objects that end up empty out of the request */
-export function dropEmptyValues<T>(values: T): T {
-    if (!isPlainObject(values)) return values;
-    const entries = Object.entries(values)
-        .filter(([, value]) => value !== "" && value !== undefined)
-        .map(([key, value]) => [key, dropEmptyValues(value)] as const)
-        .filter(([, value]) => !(isPlainObject(value) && Object.keys(value).length === 0));
-    return Object.fromEntries(entries) as T;
-}
-
-/** Display a value in a table cell */
-export function formatValue(value: unknown, format?: string): string {
-    if (value === null || value === undefined || value === "") return "—";
-    if (typeof value === "boolean") return value ? ${JSON.stringify(s.yes)} : ${JSON.stringify(s.no)};
-    if (Array.isArray(value)) return value.map((item) => formatValue(item)).join(", ");
-    if (typeof value === "object") return JSON.stringify(value);
-    if (format === "date-time" || format === "date") {
-        const date = new Date(String(value));
-        if (!Number.isNaN(date.getTime())) return format === "date" ? date.toLocaleDateString() : date.toLocaleString();
-    }
-    return String(value);
-}
-
-/** Read a nested property, e.g. readPath(response, ["data", "token"]) */
-export function readPath(value: unknown, path: string[]): unknown {
-    return path.reduce<unknown>((current, key) => (current && typeof current === "object" ? (current as Record<string, unknown>)[key] : undefined), value);
 }
 `;
 }

@@ -29,7 +29,48 @@ paths:
                     type: object
                     properties:
                       token: {type: string}
+                      refreshToken: {type: string}
+                      permissions: {type: array, items: {type: string}}
                       user: {$ref: '#/components/schemas/User'}
+  /api/auth/refresh:
+    post:
+      operationId: refreshToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [refreshToken], properties: {refreshToken: {type: string}}}
+      responses:
+        "200":
+          description: A new access token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: object, properties: {token: {type: string}, refreshToken: {type: string}}}
+  /api/auth/logout:
+    post:
+      operationId: logout
+      responses:
+        "204": {description: Signed out}
+  /api/users/{id}/sessions:
+    get:
+      operationId: listUserSessions
+      summary: Sessions
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses:
+        "200":
+          description: The user's open sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/Session'}}
   /api/users/{id}/status:
     post:
       operationId: setUserStatus
@@ -85,6 +126,8 @@ paths:
       parameters:
         - {name: page, in: query, schema: {type: integer}}
         - {name: limit, in: query, schema: {type: integer}}
+        - {name: roleId, in: query, schema: {type: integer}}
+        - {name: active, in: query, schema: {type: boolean}}
       responses:
         "200":
           description: A page of users in an envelope, total under meta
@@ -118,6 +161,7 @@ paths:
         "200": {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/UserEnvelope'}}}}
     delete:
       operationId: deleteUser
+      x-permission: users.delete
       responses:
         "200":
           description: Deleted
@@ -179,6 +223,7 @@ components:
       properties:
         name: {type: string}
         nickname: {type: string}
+        roleId: {type: integer}
         active: {type: boolean}
     User:
       allOf:
@@ -194,6 +239,12 @@ components:
     Team:
       type: object
       properties: {id: {type: integer}, title: {type: string}}
+    Session:
+      type: object
+      properties:
+        id: {type: integer}
+        device: {type: string}
+        lastSeen: {type: string, format: date-time}
     Event:
       type: object
       properties:

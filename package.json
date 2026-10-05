@@ -1,6 +1,6 @@
 {
   "name": "api-gen-package",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Generate a TypeScript API client, React Query hooks and shadcn/ui CRUD dashboards from OpenAPI 3 documents.",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,6 +20,7 @@
     "bin",
     "dist",
     "config.schema.json",
+    "examples",
     "README.md",
     "CHANGELOG.md"
   ],

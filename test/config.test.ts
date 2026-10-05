@@ -11,7 +11,8 @@ test('loads a YAML design file and resolves its paths', async () => {
     const config = await loadConfig(path.join(FIXTURES, 'wrapped.design.yaml'));
     assert.equal(config.input, path.join(FIXTURES, 'wrapped.yaml'));
     assert.equal(config.ui?.locale, 'fr');
-    assert.deepEqual(config.ui?.resources?.users?.columns, ['name', 'nickname', 'active']);
+    assert.deepEqual(config.ui?.resources?.users?.columns, ['name', 'nickname', 'roleId', 'active']);
+    assert.deepEqual(config.ui?.locales, ['fr', 'en']);
     assert.ok(!('$schema' in config));
 });
 
@@ -29,7 +30,7 @@ test('rejects mistakes with one readable line each, suggesting the intended name
             validateConfig(
                 {
                     rooter: 'next',
-                    ui: { locale: 'es', pageSize: 'ten', resources: { users: { colums: ['name'], fields: { name: { lable: 'Nom', widget: 'wysiwyg' } } } } },
+                    ui: { locale: 'xx', pageSize: 'ten', resources: { users: { colums: ['name'], fields: { name: { lable: 'Nom', widget: 'wysiwyg' } } } } },
                 },
                 'api-gen.config.yaml'
             ),
@@ -39,7 +40,7 @@ test('rejects mistakes with one readable line each, suggesting the intended name
                 [
                     'api-gen.config.yaml is invalid:',
                     '  rooter: unknown option (did you mean "router"?)',
-                    '  ui.locale: must be one of "en", "fr"',
+                    '  ui.locale: must be one of "en", "fr", "es", "de", "pt", "it"',
                     '  ui.pageSize: must be integer',
                     '  ui.resources.users.colums: unknown option (did you mean "columns"?)',
                     '  ui.resources.users.fields.name.lable: unknown option (did you mean "label"?)',
@@ -64,7 +65,9 @@ test('init writes a design file listing resources, columns, fields and actions, 
     const design = YAML.parse(yaml);
     validateConfig(design);
     assert.deepEqual(design.ui.nav, ['users', 'roles', 'teams', 'events']);
-    assert.deepEqual(design.ui.resources.users.columns, ['name', 'nickname', 'active', 'id']);
+    assert.deepEqual(design.ui.resources.users.columns, ['name', 'nickname', 'roleId', 'active', 'id']);
+    assert.equal(design.ui.resources.users.icon, 'users', 'a likely icon is suggested');
+    assert.equal(design.ui.resources.roles.icon, 'shield');
     assert.deepEqual(design.ui.resources.users.actions.setUserStatus, { label: 'Set status' });
     assert.deepEqual(Object.keys(design.ui.resources.auth.fields), ['email', 'password'], 'the login form is designable too');
 

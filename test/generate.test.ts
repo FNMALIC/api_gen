@@ -52,7 +52,10 @@ test('generates a working Next.js App Router project with auth, server-side list
     assert.ok(exists('app/(dashboard)/layout.tsx'));
     assert.ok(exists('app/(dashboard)/products/page.tsx'));
     assert.ok(exists('app/(dashboard)/products/create/page.tsx'));
-    assert.ok(exists('app/(dashboard)/products/[id]/page.tsx'));
+    assert.ok(exists('app/(dashboard)/products/[id]/page.tsx'), 'detail page');
+    assert.ok(exists('app/(dashboard)/products/[id]/edit/page.tsx'), 'edit page');
+    assert.ok(exists('app/(dashboard)/dashboard/page.tsx'), 'home page');
+    assert.match(read('app/(dashboard)/products/[id]/edit/page.tsx'), /from "\.\.\/\.\.\/ProductForm"/);
     // Orders can be listed and created, but not edited or deleted
     assert.ok(exists('app/(dashboard)/orders/create/page.tsx'));
     assert.ok(!exists('app/(dashboard)/orders/[id]/page.tsx'));
@@ -87,7 +90,7 @@ test('generates a working Next.js App Router project with auth, server-side list
     assert.match(form, /name="dimensions\.width"/);
     // Optional nested object: its required "width" only applies once something in it is filled in
     assert.match(form, /dimensions: z[^]*\.nullish\(\)[^]*\.superRefine\(/);
-    assert.match(form, /<FormDescription>When the product goes on sale<\/FormDescription>/);
+    assert.match(form, /<FormDescription>\{"When the product goes on sale"\}<\/FormDescription>/);
     assert.match(form, /Product name/);
     // Multipart create
     assert.match(read('app/(dashboard)/documents/create/page.tsx'), /toFormData\(values\)/);
@@ -135,7 +138,7 @@ test('login page, row actions, separate edit form and UI options (French, theme,
     assert.match(read('pages/roles/EditRole.tsx'), /<RoleEditForm/);
     // Row actions
     const list = read('pages/users/UsersList.tsx');
-    assert.match(list, /useSetUserStatus, useResetUserPassword/);
+    assert.match(list, /useResetUserPassword, useSetUserStatus/);
     assert.match(list, /<SetUserStatusForm/);
     assert.match(read('hooks/useUsers.ts'), /export const useSetUserStatus = /);
     // UI options
@@ -154,15 +157,30 @@ test('the YAML design shapes the generated pages', async () => {
     const { dir, read, exists, result } = await generateFixture('wrapped.yaml', { ui: config.ui });
     assert.deepEqual(result.warnings.filter(warning => warning.startsWith('ui.')), []);
     const list = read('pages/users/UsersList.tsx');
-    assert.match(list, /key: "name"[^]*key: "nickname", label: "Surnom"[^]*key: "active"/);
+    // Two languages: labels go through tl() and UI strings through t(), looked up at runtime
+    assert.match(list, /key: "name"[^]*key: "nickname", label: tl\("Surnom"\)[^]*key: "roleId", label: tl\("Rôle"\), kind: "text", lookup: "roleNameLabels"[^]*key: "active"/);
     assert.doesNotMatch(list, /key: "id"/, 'columns not listed are left out');
-    assert.match(list, /"Comptes des personnes qui utilisent l'application\."/);
-    assert.match(list, /"Réinitialiser le mot de passe"/);
+    assert.match(list, /tl\("Comptes des personnes qui utilisent l'application\."\)/);
+    assert.match(list, /tl\("Réinitialiser le mot de passe"\)/);
+    assert.match(list, /\{t\("addNew"\)\}/);
+    // Filters from the list's query parameters, the role one filled from GET /roles
+    assert.match(list, /const roleNameOptions = useOptions\(useRoles\(\)\.data, "id", "name"\);/);
+    assert.match(list, /setFilter\("active", value\)/);
+    // x-permission on DELETE /users/{id}
+    assert.match(list, /\{can\(\["users\.delete"\]\) && \(/);
     const form = read('pages/users/UserForm.tsx');
     assert.match(form, /<Textarea/, 'widget: textarea');
     assert.match(form, /Affiché dans l'application/);
-    assert.match(read('pages/LoginForm.tsx'), /Adresse e-mail[^]*placeholder=\{"vous@exemple\.com"\}/);
-    assert.match(read('pages/LayoutWithSidebar.tsx'), /href: "\/roles"[^]*href: "\/users"/, 'sidebar follows ui.nav');
+    assert.match(form, /<NativeSelect[^>]*options=\{roleNameOptions\}/, 'roleId is picked from the roles');
+    assert.match(read('pages/LoginForm.tsx'), /Adresse e-mail[^]*placeholder=\{tl\("vous@exemple\.com"\)\}/);
+    const layout = read('pages/LayoutWithSidebar.tsx');
+    assert.match(layout, /href: "\/roles"[^]*href: "\/users"/, 'sidebar follows ui.nav');
+    assert.match(layout, /import \{ LayoutDashboard, Shield, Users \} from "lucide-react";/);
+    assert.match(layout, /<LanguageSwitch \/>/);
+    const i18n = read('components/api-gen/i18n.ts');
+    assert.match(i18n, /Utilisateurs: "Users"/);
+    assert.match(i18n, /DEFAULT_LOCALE: Locale = "fr"/);
+    assert.ok(result.dependencies.includes('lucide-react'));
     assert.ok(!exists('pages/teams/TeamsList.tsx'));
     typecheck(dir);
 });
