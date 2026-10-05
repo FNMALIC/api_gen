@@ -447,7 +447,7 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
         await page.goto(`${baseUrl}/products`);
         await page.getByRole('link', { name: 'Product 03' }).click();
         await page.waitForURL(`${baseUrl}/products/p3`);
-        await page.getByText('Lamps').waitFor();
+        await page.locator('dl').getByText('Lamps').waitFor();
         const details = (await page.locator('dl').innerText()).replace(/\s+/g, ' ');
         assert.match(details, /Product name Product 03/);
         assert.match(details, /Category Lamps/);

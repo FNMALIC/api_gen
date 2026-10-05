@@ -347,7 +347,18 @@ export function Cell({ value, kind }: { value: unknown; kind?: CellKind }) {
                 </a>
             );
         case "image":
-            return <img src={String(value)} alt="" loading="lazy" className="h-10 w-10 rounded-md border object-cover" />;
+            return (
+                <img
+                    src={String(value)}
+                    alt=""
+                    loading="lazy"
+                    className="h-10 w-10 rounded-md border bg-muted object-cover"
+                    // A missing image leaves an empty tile rather than the browser's broken-image icon
+                    onError={(event) => {
+                        event.currentTarget.removeAttribute("src");
+                    }}
+                />
+            );
         case "json":
             return <code className="block max-w-md truncate text-xs">{JSON.stringify(value)}</code>;
         default:

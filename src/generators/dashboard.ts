@@ -197,16 +197,19 @@ function sidebarShell(options: LayoutOptions, nav: string, signOut: string, main
                 <span className="truncate font-semibold">{${ui.label(ui.title)}}</span>
             </header>
             {menuOpen && <div className="fixed inset-0 z-30 bg-black/40 md:hidden" aria-hidden onClick={() => setMenuOpen(false)} />}
+            {/* The column runs the full height of the page; its content stays in view while scrolling */}
             <aside
                 className={cn(
-                    "fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col overflow-y-auto border-r bg-background p-4 transition-transform md:sticky md:top-0 md:h-screen md:w-56 md:translate-x-0 md:bg-muted/40",
+                    "fixed inset-y-0 left-0 z-40 w-64 shrink-0 border-r bg-background transition-transform md:static md:w-56 md:translate-x-0 md:bg-muted/40",
                     menuOpen ? "translate-x-0" : "-translate-x-full"
                 )}
             >
-                <div className="mb-4 px-3 text-lg font-semibold">{${ui.label(ui.title)}}</div>
-                <nav className="flex flex-col gap-1">
-                    ${nav}
-                </nav>${sidebarFooter(options, signOut)}
+                <div className="flex h-full flex-col overflow-y-auto p-4 md:sticky md:top-0 md:h-screen">
+                    <div className="mb-4 px-3 text-lg font-semibold">{${ui.label(ui.title)}}</div>
+                    <nav className="flex flex-col gap-1">
+                        ${nav}
+                    </nav>${sidebarFooter(options, signOut)}
+                </div>
             </aside>
             <main className="min-w-0 flex-1 p-4 md:p-6">${main}</main>
             <Toaster />
