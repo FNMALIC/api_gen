@@ -59,6 +59,7 @@ export interface OperationObject {
     requestBody?: RequestBodyObject;
     responses?: Record<string, ResponseObject>;
     security?: SecurityRequirement[];
+    [extension: `x-${string}`]: unknown;
 }
 
 export const HTTP_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const;
@@ -139,6 +140,8 @@ export interface Operation {
     returnSchema: SchemaObject | null;
     crud: CrudAction | null;
     functionName: string;
+    /** x-label on the operation: the label of its button in the dashboard */
+    xLabel?: unknown;
 }
 
 export interface Field {
@@ -185,9 +188,33 @@ export interface Model {
     basePath: string;
     operations: Operation[];
     crud: Partial<Record<CrudAction, Operation>>;
+    /** Fields of the create form (create request body) */
     formFields: Field[];
+    /** Fields of the edit form (update request body, which may differ from the create body) */
+    editFields: Field[];
     columns: Field[];
+    /** Item operations outside create/read/update/delete, e.g. POST /users/{id}/status */
+    actions: Action[];
     listCapabilities: ListCapabilities | null;
+}
+
+export interface Action {
+    op: Operation;
+    /** Button label, from x-label, the summary or the last path segment */
+    label: string;
+    /** PascalCase name used for the hook (use<Name>) and the form component */
+    Name: string;
+    /** Body fields, or null when the operation takes no body */
+    fields: Field[] | null;
+}
+
+/** A sign-in endpoint: POST .../login with a password field, returning a token */
+export interface LoginInfo {
+    model: Model;
+    op: Operation;
+    fields: Field[];
+    /** Where the token is in what the API function returns, e.g. ["accessToken"] or ["data", "token"] */
+    tokenPath: string[];
 }
 
 /** Generated files: path relative to the output directory -> content */
@@ -202,7 +229,7 @@ export interface TemplateContext {
     defaultContent: string;
 }
 
-export type TemplateKind = 'api' | 'hooks' | 'listPage' | 'createPage' | 'editPage' | 'form' | 'layout' | 'routes';
+export type TemplateKind = 'api' | 'hooks' | 'listPage' | 'createPage' | 'editPage' | 'form' | 'layout' | 'routes' | 'loginPage';
 
 /** Return new content for a generated file, or undefined to keep the default */
 export type Templates = Partial<Record<TemplateKind, (context: TemplateContext) => string | undefined | null>>;

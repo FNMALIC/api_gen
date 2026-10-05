@@ -80,7 +80,7 @@ test('generates a working Next.js App Router project with auth, server-side list
 
     // Form field kinds
     const form = read('app/(dashboard)/products/ProductForm.tsx');
-    assert.match(form, /<ListInput type="text"/);
+    assert.match(form, /<ListInput\s+type="text"/);
     assert.match(form, /<CheckboxGroup/);
     assert.match(form, /<DateTimeInput/);
     assert.match(form, /<JsonInput/);
@@ -114,6 +114,49 @@ test('wrapped { success, data } responses: unwrapped records, nested totals, wor
     assert.match(read('pages/users/EditUser.tsx'), /defaultValues=\{data\}/);
     assert.match(read('pages/users/UsersList.tsx'), /\?\.\["meta"\]\?\.\["total"\]/);
     typecheck(dir);
+});
+
+test('login page, row actions, separate edit form and UI options (French, theme, title)', async () => {
+    const { dir, read, exists, result } = await generateFixture('wrapped.yaml', {
+        ui: { locale: 'fr', title: 'Mon BO', primaryColor: '#16a34a', pageSize: 25, resources: { teams: { hidden: true }, users: { label: 'Utilisateurs' } } },
+    });
+    // Login
+    assert.ok(exists('pages/LoginPage.tsx'));
+    assert.ok(exists('components/api-gen/session.ts'));
+    assert.match(read('components/api-gen/session.ts'), /setCredentials\("bearerAuth", getToken\)/);
+    assert.match(read('pages/routes.tsx'), /path: "\/login"/);
+    assert.match(read('pages/LayoutWithSidebar.tsx'), /<Navigate to="\/login" replace \/>/);
+    assert.match(read('pages/LoginPage.tsx'), /readPath\(result, \["token"\]\)/);
+    assert.ok(!result.warnings.some(warning => warning.includes('"auth"')), 'the login resource is not reported as skipped');
+    // Separate edit form
+    const roleForm = read('pages/roles/RoleForm.tsx');
+    assert.match(roleForm, /roleCreateFormSchema = z\.object\(\{[^]*permissions[^]*\}\);/);
+    assert.doesNotMatch(roleForm.slice(roleForm.indexOf('roleEditFormSchema')), /permissions/);
+    assert.match(read('pages/roles/EditRole.tsx'), /<RoleEditForm/);
+    // Row actions
+    const list = read('pages/users/UsersList.tsx');
+    assert.match(list, /useSetUserStatus, useResetUserPassword/);
+    assert.match(list, /<SetUserStatusForm/);
+    assert.match(read('hooks/useUsers.ts'), /export const useSetUserStatus = /);
+    // UI options
+    assert.match(list, /const PAGE_SIZE = 25;/);
+    assert.match(list, /"Utilisateurs"/);
+    assert.match(list, /"Ajouter"/);
+    assert.match(read('pages/LayoutWithSidebar.tsx'), /"Mon BO"/);
+    assert.match(read('components/api-gen/theme.css'), /--primary: #16a34a;/);
+    assert.match(read('pages/LayoutWithSidebar.tsx'), /import "@\/components\/api-gen\/theme\.css";/);
+    assert.ok(!exists('pages/teams/TeamsList.tsx'), 'hidden resources get no pages');
+    typecheck(dir);
+});
+
+test('generated pages work with both Radix and Base UI flavours of shadcn/ui', async () => {
+    const { output } = await generateFixture('shop.json');
+    const files = fs.readdirSync(output, { recursive: true, encoding: 'utf8' }).filter(file => file.endsWith('.tsx'));
+    for (const file of files) {
+        const source = fs.readFileSync(path.join(output, file), 'utf8');
+        assert.doesNotMatch(source, /asChild/, `${file} uses the Radix-only asChild prop`);
+        assert.doesNotMatch(source, /@\/components\/ui\/(form|select|alert-dialog)"/, `${file} imports a component newer shadcn styles don't ship`);
+    }
 });
 
 test('Swagger 2.0 input generates a working project', async () => {

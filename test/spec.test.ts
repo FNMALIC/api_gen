@@ -1,11 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { loadSpec, buildModels, splitPrefix } from '../src/spec.ts';
+import { loadSpec, buildModels, splitPrefix, formatValidationErrors } from '../src/spec.ts';
 import { createTypeContext } from '../src/generators/types.ts';
 import { singularize, pluralize, pascalCase } from '../src/helpers.ts';
 import type { Model } from '../src/model.ts';
 import { FIXTURES } from './helpers.ts';
+
+async function build(fixture: string, options?: Parameters<typeof buildModels>[2]) {
+    const api = await loadSpec(path.join(FIXTURES, fixture));
+    return buildModels(api, createTypeContext(api), options);
+}
 
 async function models(fixture: string, options?: Parameters<typeof buildModels>[2]): Promise<Record<string, Model>> {
     const api = await loadSpec(path.join(FIXTURES, fixture));
@@ -145,6 +150,51 @@ test('envelope option: an explicit key or false', async () => {
     const explicit = await models('wrapped.yaml', { envelope: 'data' });
     // With an explicit key, any response carrying that property counts, including events' own "data" field
     assert.deepEqual(explicit.events.crud.retrieve!.envelope, { key: 'data' });
+});
+
+test('edit forms use the update body, create forms the create body', async () => {
+    const { roles } = await models('wrapped.yaml');
+    assert.deepEqual(roles.formFields.map(f => f.name), ['name', 'permissions']);
+    assert.deepEqual(roles.editFields.map(f => f.name), ['name', 'description']);
+});
+
+test('item operations outside CRUD become row actions', async () => {
+    const { users } = await models('wrapped.yaml');
+    assert.deepEqual(
+        users.actions.map(action => ({ label: action.label, Name: action.Name, fields: action.fields?.map(f => f.name) ?? null })),
+        [
+            { label: 'Set status', Name: 'SetUserStatus', fields: ['status', 'reason'] },
+            { label: 'Reset password', Name: 'ResetUserPassword', fields: null },
+        ]
+    );
+});
+
+test('detects the sign-in endpoint and where its token is', async () => {
+    const { login } = await build('wrapped.yaml');
+    assert.ok(login);
+    assert.equal(login.op.functionName, 'loginAuth'); // bare verbs get the resource name, like listUsers
+    assert.deepEqual(login.fields.map(f => f.name), ['email', 'password']);
+    // The response is { success, data: { token, user } }; the API function already returns data
+    assert.deepEqual(login.tokenPath, ['token']);
+    assert.equal((await build('shop.json')).login, null);
+});
+
+test('reports spec errors as one readable line per problem', () => {
+    const message = formatValidationErrors([
+        { instancePath: '/paths/~1roles/post/requestBody/content/application~1json/schema/required', keyword: 'minItems', params: { limit: 1 } },
+        { instancePath: '/paths/~1roles/post/requestBody/content/application~1json/schema', keyword: 'required', params: { missingProperty: '$ref' } },
+        { instancePath: '/paths/~1roles/post/requestBody', keyword: 'oneOf', params: {} },
+        { instancePath: '/paths/~1users~1{id}/get/responses/200', keyword: 'required', params: { missingProperty: 'description' } },
+        { instancePath: '/paths/~1users~1{id}/get/responses/200', keyword: 'additionalProperties', params: { additionalProperty: 'descriptio' } },
+    ]);
+    assert.equal(
+        message,
+        [
+            'The OpenAPI document is invalid (2 problems):',
+            '  paths["/roles"].post.requestBody.content["application/json"].schema.required: must not be empty (remove it or list at least one item)',
+            '  paths["/users/{id}"].get.responses["200"]: missing "description"; unknown property "descriptio"',
+        ].join('\n')
+    );
 });
 
 test('converts Swagger 2.0 documents', async () => {

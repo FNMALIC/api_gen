@@ -1,6 +1,39 @@
 # Changelog
 
-## 2.1.0 (unreleased)
+## 2.2.0 (unreleased)
+
+Improvements from a real back-office build, and options to customize the dashboard.
+
+### Fixed
+
+- Edit pages use the update request body's fields. They used the create body's, so fields `PUT`/`PATCH` doesn't
+  accept (like a role's permissions) were shown and silently ignored.
+- The dashboard no longer depends on shadcn/ui components that newer styles don't ship (`form`, `select`,
+  `alert-dialog`) or on the Radix-only `asChild` prop. Forms, selects and dialogs are generated into
+  `components/api-gen/`, so it works with both Radix and Base UI setups. CI now also tests a project created with
+  `shadcn init` defaults.
+- Spec errors are reported once per problem with a readable location, instead of several lines of validator output.
+- On Node.js older than 22.19 the CLI says so and how to upgrade, instead of failing with a syntax error.
+
+### Added
+
+- Login page when the API has a sign-in endpoint: token storage, bearer token on secured requests, redirect to
+  `/login` when signed out or on 401, sign-out button. `--no-login` turns it off.
+- Row actions: item operations such as `POST /users/{id}/status` get a button on each row, with a confirmation or a
+  form dialog, and a hook (`useSetUserStatus`).
+- Dashboard options (`ui` in the config file, plus flags): `title`, `locale` (`en`, `fr`), `labels` to override any
+  string, `pageSize`, `primaryColor`, `theme` (any shadcn color token for light and dark, `radius`, `font`),
+  `darkModeToggle`, and per-resource `label`, `singularLabel` and `hidden`.
+- Light/dark switch in the sidebar, the dashboard title in the sidebar, and `/` redirecting to the first resource.
+- The CLI prints the npm packages to install along with the shadcn components.
+
+### Changed
+
+- The generated form components are `<Resource>CreateForm` and `<Resource>EditForm` (was `<Resource>Form`).
+- Install `react-hook-form`, `zod` and `@hookform/resolvers` yourself: the shadcn `form` component used to pull them in.
+- Bare `operationId`s like `login` get the resource name appended, as other bare verbs already did (`loginAuth`).
+
+## 2.1.0
 
 ### Added
 
