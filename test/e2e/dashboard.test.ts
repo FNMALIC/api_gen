@@ -18,7 +18,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { chromium, type Browser, type Page, type Route } from 'playwright-core';
-import { generate, type GenerateOptions } from '../../src/index.ts';
+import { generate, loadConfig, type GenerateOptions } from '../../src/index.ts';
 import { binScript } from '../helpers.ts';
 import { SHADCN_COMPONENTS, dashboardDependencies } from '../../src/generators/dashboard.ts';
 
@@ -498,7 +498,7 @@ describe('generated dashboard (Vite + React Router + shadcn/ui)', { timeout: 20 
 // ---------------------------------------------------------------------------------------------------------------
 // An API that wraps every response: { success, data, meta } (test/fixtures/wrapped.yaml)
 
-describe('generated dashboard for a wrapped API with login, row actions and French UI', { timeout: 20 * 60_000 }, () => {
+describe('generated dashboard for a wrapped API with login, row actions and a French YAML design', { timeout: 20 * 60_000 }, () => {
     let server: ChildProcess | undefined;
     let browser: Browser | undefined;
     let page: Page;
@@ -565,7 +565,9 @@ describe('generated dashboard for a wrapped API with login, row actions and Fren
 
     before(async () => {
         installApp();
-        await generateInto('wrapped.yaml', { ui: { locale: 'fr', title: 'Mon back-office', primaryColor: '#16a34a' } });
+        // Design from a YAML file, as a developer would write it
+        const design = await loadConfig(path.join(ROOT, 'test', 'fixtures', 'wrapped.design.yaml'));
+        await generateInto('wrapped.yaml', { ui: design.ui });
         users = Array.from({ length: 25 }, (_, i) => ({ id: i + 1, name: `User ${String(i + 1).padStart(2, '0')}`, nickname: `nick${i + 1}`, active: i % 2 === 0 }));
         roles = [{ id: 1, name: 'Editor', description: 'Can edit', permissions: ['users.read'] }];
     });
@@ -591,6 +593,8 @@ describe('generated dashboard for a wrapped API with login, row actions and Fren
         await page.goto(`${baseUrl}/users`);
         await page.waitForURL(`${baseUrl}/login`);
         await page.getByText('Connexion à Mon back-office').waitFor();
+        await page.getByLabel('Adresse e-mail').waitFor();
+        assert.equal(await page.getByLabel('Adresse e-mail').getAttribute('placeholder'), 'vous@exemple.com');
 
         await page.locator('input[name=email]').fill('admin@example.com');
         await page.locator('input[name=password]').fill('wrong');
@@ -599,13 +603,21 @@ describe('generated dashboard for a wrapped API with login, row actions and Fren
 
         await page.locator('input[name=password]').fill('secret');
         await page.getByRole('button', { name: 'Se connecter' }).click();
-        await page.waitForURL(`${baseUrl}/users`);
-        await page.getByText('User 01').waitFor();
+        // Signed in, "/" opens the first resource of the sidebar, which the design puts first: roles
+        await page.waitForURL(`${baseUrl}/roles`);
+        await page.getByText('Editor').waitFor();
         assert.equal(requests.at(-1)?.authorization, 'Bearer token-for-admin@example.com');
     });
 
-    it('shows the title, French labels and the custom primary color', async () => {
+    it('shows the title, French labels, the design and the custom primary color', async () => {
+        await page.goto(`${baseUrl}/users`);
+        await page.getByText('User 01').waitFor();
         await page.getByText('Mon back-office').first().waitFor();
+        await page.getByText("Comptes des personnes qui utilisent l'application.").waitFor();
+        const headers = (await page.locator('thead').innerText()).replace(/\s+/g, ' ').trim();
+        assert.equal(headers, 'Name Surnom Active Actions', 'only the columns the design lists, with its labels');
+        const nav = (await page.locator('aside nav').innerText()).replace(/\s+/g, ' ').trim();
+        assert.equal(nav, 'Roles Utilisateurs Events', 'sidebar in ui.nav order; teams hidden');
         assert.match(await mainText(), /Page 1 sur 3/);
         assert.ok(await page.getByRole('link', { name: 'Ajouter' }).isVisible());
         const primary = await page.evaluate('getComputedStyle(document.documentElement).getPropertyValue("--primary").trim()');
@@ -647,17 +659,18 @@ describe('generated dashboard for a wrapped API with login, row actions and Fren
         await page.goto(`${baseUrl}/users`);
         await page.getByText('User 01').waitFor();
 
-        await page.getByRole('button', { name: 'Set status' }).first().click();
+        await page.getByRole('button', { name: 'Changer le statut' }).first().click();
         const statusDialog = page.getByRole('dialog');
         await statusDialog.locator('select[name=status]').selectOption('suspended');
-        await statusDialog.getByRole('button', { name: 'Set status' }).click();
-        await page.getByText('Set status : effectué').waitFor();
-        assert.deepEqual(lastBody, { status: 'suspended' });
+        await statusDialog.locator('textarea[name=reason]').fill('Spam');
+        await statusDialog.getByRole('button', { name: 'Changer le statut' }).click();
+        await page.getByText('Changer le statut : effectué').waitFor();
+        assert.deepEqual(lastBody, { status: 'suspended', reason: 'Spam' });
         assert.ok(requests.some(request => request.method === 'POST' && request.path === '/api/users/1/status'));
 
-        await page.getByRole('button', { name: 'Reset password' }).first().click();
-        await page.getByRole('alertdialog').getByRole('button', { name: 'Reset password' }).click();
-        await page.getByText('Reset password : effectué').waitFor();
+        await page.getByRole('button', { name: 'Réinitialiser le mot de passe' }).first().click();
+        await page.getByRole('alertdialog').getByRole('button', { name: 'Réinitialiser le mot de passe' }).click();
+        await page.getByText('Réinitialiser le mot de passe : effectué').waitFor();
         assert.ok(requests.some(request => request.method === 'POST' && request.path === '/api/users/1/reset-password'));
     });
 
@@ -674,7 +687,7 @@ describe('generated dashboard for a wrapped API with login, row actions and Fren
         await page.getByText('User 01').waitFor();
         await page.getByRole('button', { name: 'Supprimer' }).first().click();
         await page.getByRole('alertdialog').getByRole('button', { name: 'Supprimer' }).click();
-        await page.getByText('User : supprimé').waitFor();
+        await page.getByText('Utilisateur : supprimé').waitFor();
         await page.getByText('User 11').waitFor();
         assert.ok(!users.some(user => user.id === 1));
     });

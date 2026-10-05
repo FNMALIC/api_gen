@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fill, generateThemeCss, resolveUi, LOCALES } from '../src/ui.ts';
+import path from 'node:path';
+import { fill, generateThemeCss, resolveUi, applyResourceOptions, LOCALES } from '../src/ui.ts';
+import { loadSpec, buildModels } from '../src/spec.ts';
+import { createTypeContext } from '../src/generators/types.ts';
+import { FIXTURES } from './helpers.ts';
 
 test('resolves UI options with defaults', () => {
     const ui = resolveUi(undefined, 'Shop API');
@@ -41,4 +45,50 @@ test('writes theme CSS with readable text on the primary color', () => {
     assert.doesNotMatch(css.slice(css.indexOf(':root.dark')), /destructive/, 'light-only colors stay out of dark mode');
     assert.match(css, /font-family: Inter, sans-serif;/);
     assert.match(generateThemeCss({ colors: { primary: '#1e3a8a' } })!, /--primary-foreground: #fafafa;/, 'light text on dark blue');
+});
+
+test('applies the design: labels, columns, fields, actions, sidebar order, and warns about unknown names', async () => {
+    const api = await loadSpec(path.join(FIXTURES, 'wrapped.yaml'));
+    const built = buildModels(api, createTypeContext(api));
+    const ui = resolveUi(
+        {
+            nav: ['roles', 'users', 'nope'],
+            resources: {
+                users: {
+                    label: 'Utilisateurs',
+                    description: 'Comptes',
+                    columns: ['name', 'active', 'missing'],
+                    fields: { nickname: { label: 'Surnom', order: 0, help: 'Aide', placeholder: 'ex. Bob', widget: 'textarea' }, ghost: { label: 'x' } },
+                    actions: { resetUserPassword: { hidden: true }, setUserStatus: { label: 'Changer le statut' }, unknownAction: {} },
+                },
+                auth: { fields: { email: { label: 'Adresse e-mail' } } },
+                userz: { label: 'typo' },
+            },
+        },
+        undefined
+    );
+    const { models, login, warnings } = applyResourceOptions(built.models, ui, built.login);
+    const users = models.find(model => model.key === 'users')!;
+
+    assert.deepEqual(models.slice(0, 2).map(model => model.key), ['roles', 'users'], 'nav order first');
+    assert.equal(users.pluralLabel, 'Utilisateurs');
+    assert.equal(users.description, 'Comptes');
+    assert.deepEqual(users.tableColumns, ['name', 'active', 'missing']);
+    const nickname = users.formFields[0];
+    assert.deepEqual(
+        { name: nickname.name, label: nickname.label, description: nickname.description, placeholder: nickname.placeholder, widget: nickname.widget },
+        { name: 'nickname', label: 'Surnom', description: 'Aide', placeholder: 'ex. Bob', widget: 'textarea' },
+        'order: 0 moves it first'
+    );
+    assert.equal(users.actions.find(action => action.Name === 'ResetUserPassword')?.hidden, true);
+    assert.equal(users.actions.find(action => action.Name === 'SetUserStatus')?.label, 'Changer le statut');
+    assert.equal(login?.fields.find(field => field.name === 'email')?.label, 'Adresse e-mail');
+
+    assert.deepEqual(warnings.map(warning => warning.split(':')[0]).sort(), [
+        'ui.nav',
+        'ui.resources.users.actions.unknownAction',
+        'ui.resources.users.columns',
+        'ui.resources.users.fields.ghost',
+        'ui.resources.userz',
+    ]);
 });

@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://unpkg.com/api-gen-package/config.schema.json",
+  "title": "api-gen-package configuration and design file",
+  "description": "Settings for generate-api and the design of the generated back-office. Write it as api-gen.config.yaml (or .json/.js).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "input": { "type": "string", "description": "OpenAPI 3 or Swagger 2 document: path (relative to this file) or URL" },
+    "output": { "type": "string", "description": "Output directory, relative to this file (default ./src)" },
+    "only": {
+      "type": "array",
+      "items": { "enum": ["api", "hooks", "dashboard"] },
+      "uniqueItems": true,
+      "description": "Generate only some parts"
+    },
+    "router": { "enum": ["react-router", "next"], "description": "Dashboard routing (default react-router)" },
+    "baseUrl": { "type": "string", "description": "axios baseURL when utils/api.ts is first created" },
+    "prefix": { "type": "string", "description": "Path prefix before the resource name, e.g. /api/v1" },
+    "groupBy": { "enum": ["path", "tag"], "description": "Group operations by first path segment or by first tag" },
+    "envelope": {
+      "oneOf": [{ "type": "string" }, { "const": false }],
+      "description": "Payload property of wrapped responses like { success, data }, or false to never unwrap"
+    },
+    "zod": { "type": "boolean", "description": "Validate JSON responses at runtime with generated zod schemas" },
+    "login": { "type": "boolean", "description": "Generate a login page when the API has a sign-in endpoint (default true)" },
+    "templates": { "type": "string", "description": "JS module exporting template overrides" },
+    "clean": { "type": "boolean", "description": "Delete files from earlier runs that are no longer generated (default true)" },
+    "format": { "type": "boolean", "description": "Format output with Prettier (default true)" },
+    "ui": { "$ref": "#/definitions/ui" }
+  },
+  "definitions": {
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Look and wording of the back-office",
+      "properties": {
+        "title": { "type": "string", "description": "Sidebar and login page title (default: the document's info.title)" },
+        "locale": { "enum": ["en", "fr"], "description": "Built-in wording (default en)" },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Override any UI string, e.g. addNew, save, signIn"
+        },
+        "pageSize": { "type": "integer", "minimum": 1, "description": "Rows per page (default 10)" },
+        "primaryColor": { "type": "string", "description": "Color of buttons and highlights, e.g. \"#2563eb\"" },
+        "theme": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "colors": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "shadcn/ui color tokens for light mode: primary, secondary, accent, destructive, background, foreground, muted, border, sidebar, ..."
+            },
+            "darkColors": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "The same tokens for dark mode"
+            },
+            "radius": { "type": "string", "description": "Corner radius, e.g. 0.25rem (square) or 1rem (round)" },
+            "font": { "type": "string", "description": "CSS font-family of the dashboard" }
+          }
+        },
+        "darkModeToggle": { "type": "boolean", "description": "Light/dark switch in the sidebar (default true)" },
+        "nav": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Sidebar order, by resource name; resources not listed follow"
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/resource" },
+          "description": "Per resource, by its name in the URL (users, product-categories)"
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "description": "Plural label, e.g. Utilisateurs" },
+        "singularLabel": { "type": "string", "description": "Singular label, e.g. Utilisateur" },
+        "description": { "type": "string", "description": "Text under the list page title" },
+        "hidden": { "type": "boolean", "description": "Leave this resource out of the dashboard" },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Table columns, in order; others are left out"
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/field" },
+          "description": "Per field, by property name"
+        },
+        "actions": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/action" },
+          "description": "Per row action, by operationId"
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "hidden": {
+          "oneOf": [{ "type": "boolean" }, { "enum": ["table", "form"] }],
+          "description": "Hide everywhere, or only in the table or the form"
+        },
+        "order": { "type": "number", "description": "Position in forms (lower first)" },
+        "help": { "type": "string", "description": "Help text under the input" },
+        "placeholder": { "type": "string" },
+        "widget": {
+          "enum": ["text", "textarea", "password", "email", "url", "date", "datetime"],
+          "description": "Input for text fields"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "description": "Button label" },
+        "hidden": { "type": "boolean", "description": "Leave the button out" }
+      }
+    }
+  }
+}

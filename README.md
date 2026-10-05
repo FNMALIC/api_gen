@@ -29,13 +29,14 @@ Requires Node.js 22.19 or newer. On an older Node you can still run it once with
 
 ```bash
 generate-api [input] [output] [options]
+generate-api init [input]     # write a starting design file, see below
 ```
 
 `input` defaults to `./schema.yaml` and `output` to `./src`. The `api-gen` command is an alias.
 
 | Option | Description |
 | --- | --- |
-| `-c, --config <file>` | Config file (default: `api-gen.config.json`/`.js`/`.mjs` in the current directory) |
+| `-c, --config <file>` | Design/config file (default: `api-gen.config.yaml`, `.yml`, `.json`, `.js` or `.mjs` in the current directory) |
 | `--only <targets>` | Comma-separated subset of `api`, `hooks`, `dashboard` (default: all) |
 | `--router <router>` | Dashboard routing: `react-router` (default) or `next` |
 | `--base-url <url>` | axios `baseURL` when `utils/api.ts` is first created (default: the document's first server URL, else `/`) |
@@ -66,25 +67,67 @@ generate-api --watch
 
 The command exits with code 1 when the document is invalid or generation fails, so it can run in CI.
 
-### Config file
+## Design file (api-gen.config.yaml)
 
-Options can live in `api-gen.config.json` (or `.js`/`.mjs` exporting an object). Paths are relative to the config
-file, and command-line flags override it:
+Settings and the whole design of the back-office can live in one YAML file next to your project, so you never edit
+the OpenAPI document to change a label or hide a column. Start from your API:
 
-```json
-{
-  "input": "./openapi.yaml",
-  "output": "./src",
-  "router": "next",
-  "zod": true,
-  "prefix": "/api/v1",
-  "ui": {
-    "title": "Back-office",
-    "locale": "fr",
-    "primaryColor": "#16a34a"
-  }
-}
+```bash
+generate-api init openapi.yaml      # writes api-gen.config.yaml
+# edit it, then:
+generate-api                        # reads api-gen.config.yaml
 ```
+
+`init` lists every resource with its labels, table columns, form fields and row actions, so you only change what you
+want. A trimmed example:
+
+```yaml
+# yaml-language-server: $schema=https://unpkg.com/api-gen-package/config.schema.json
+input: ./openapi.yaml
+output: ./src
+router: react-router
+ui:
+  title: Mon back-office
+  locale: fr
+  pageSize: 20
+  primaryColor: "#16a34a"
+  theme: { radius: 0.5rem, font: "Inter, sans-serif" }
+  nav: [users, roles]                      # sidebar order
+  resources:
+    auth:                                  # the login form
+      fields:
+        email: { label: Adresse e-mail, placeholder: vous@exemple.com }
+    users:
+      label: Utilisateurs
+      singularLabel: Utilisateur
+      description: Comptes des personnes qui utilisent l'application.
+      columns: [name, email, role, createdAt] # table columns, in order
+      fields:
+        bio: { label: Biographie, widget: textarea, help: Visible sur le profil }
+        password: { hidden: table }
+        role: { order: 0 }
+      actions:
+        setUserStatus: { label: Changer le statut }
+        deleteSessions: { hidden: true }
+    logs:
+      hidden: true                         # no pages for this resource
+```
+
+What you can set:
+
+| Where | Options |
+| --- | --- |
+| top level | `input`, `output`, `router`, `only`, `prefix`, `groupBy`, `baseUrl`, `envelope`, `zod`, `login`, `templates`, `clean`, `format` |
+| `ui` | `title`, `locale` (`en`, `fr`), `labels` (any UI string), `pageSize`, `primaryColor`, `theme` (`colors`, `darkColors`, `radius`, `font`), `darkModeToggle`, `nav` |
+| `ui.resources.<name>` | `label`, `singularLabel`, `description`, `hidden`, `columns`, `fields`, `actions` |
+| `…fields.<property>` | `label`, `hidden` (`true`, `table`, `form`), `order`, `help`, `placeholder`, `widget` (`text`, `textarea`, `password`, `email`, `url`, `date`, `datetime`) |
+| `…actions.<operationId>` | `label`, `hidden` |
+
+The file is checked when you generate: a typo stops generation with a clear message (`ui.resources.users.colums:
+unknown option (did you mean "columns"?)`), and names that match nothing in your API (a resource, field, column or
+action that doesn't exist) are reported as warnings. With the `$schema` line, editors such as VS Code (with the
+YAML extension) offer completion and inline errors. `api-gen.config.json` and `.js`/`.mjs` work too, with the same
+options; command-line flags override the file.
 
 ## What gets generated
 
@@ -224,7 +267,8 @@ Use `--no-login` to leave this out.
 
 ### Customizing the dashboard
 
-Everything below goes under `"ui"` in the config file; the common ones also have command-line flags.
+Everything below goes under `ui` in the [design file](#design-file-api-genconfigyaml); the common ones also have
+command-line flags. Per-resource, per-field and per-action options are described there.
 
 | Option | Effect |
 | --- | --- |
@@ -237,7 +281,8 @@ Everything below goes under `"ui"` in the config file; the common ones also have
 | `theme.radius` | Corner radius, e.g. `"0.25rem"` |
 | `theme.font` | Font family of the dashboard, e.g. `"Inter, sans-serif"` (load the font yourself) |
 | `darkModeToggle` | Light/dark switch in the sidebar (default `true`) |
-| `resources` | Per resource (by its name in the URL): `{ "users": { "label": "Utilisateurs", "singularLabel": "Utilisateur", "hidden": false } }` |
+| `nav` | Sidebar order, by resource name |
+| `resources` | Per resource (by its name in the URL): labels, description, columns, fields, actions, hidden |
 
 Theme options are written to `components/api-gen/theme.css`, which the dashboard layout imports. Field and column
 labels come from your schema: use `x-label` (see below) to translate or rename them.

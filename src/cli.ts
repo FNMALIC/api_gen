@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { Command, Option } from 'commander';
-import { generate, watch, loadConfig, TARGETS, type GenerateOptions, type GenerateResult } from './generate.ts';
+import fs from 'node:fs';
+import { generate, watch, TARGETS, type GenerateOptions, type GenerateResult } from './generate.ts';
+import { loadConfig, createDesignFile } from './config.ts';
 import { SHADCN_COMPONENTS, dashboardDependencies } from './generators/dashboard.ts';
 import type { RouterName, Target } from './model.ts';
 
@@ -119,6 +121,22 @@ program
             console.log(`  npx shadcn@latest add ${SHADCN_COMPONENTS.join(' ')}`);
             console.log(`  npm install ${dashboardDependencies(options.router ?? 'react-router').join(' ')}`);
         }
+    });
+
+program
+    .command('init')
+    .description('write a starting design file (api-gen.config.yaml) from your OpenAPI document, to edit and then generate from')
+    .argument('[input]', 'OpenAPI document: local path or URL (default: openapi.yaml/.yml/.json or schema.yaml in the current directory)')
+    .option('-o, --output <dir>', 'output directory to record in the file', './src')
+    .addOption(new Option('--router <router>', 'routing library to record in the file').choices(['react-router', 'next']).default('react-router'))
+    .option('--file <name>', 'design file to write', 'api-gen.config.yaml')
+    .option('-f, --force', 'overwrite the design file if it exists')
+    .action(async (inputArg: string | undefined, opts: { output: string; router: string; file: string; force?: boolean }) => {
+        const input = inputArg ?? ['openapi.yaml', 'openapi.yml', 'openapi.json', 'schema.yaml', 'swagger.yaml', 'swagger.json'].find(name => fs.existsSync(name));
+        if (!input) throw new Error('No OpenAPI document found. Pass its path or URL: generate-api init <input>');
+        if (fs.existsSync(opts.file) && !opts.force) throw new Error(`${opts.file} already exists. Use --force to overwrite it.`);
+        fs.writeFileSync(opts.file, await createDesignFile(input, { output: opts.output, router: opts.router }));
+        console.log(`Wrote ${opts.file}. Edit labels, columns, fields and colors, then run: npx generate-api`);
     });
 
 program.parseAsync(process.argv).catch((error: Error) => {

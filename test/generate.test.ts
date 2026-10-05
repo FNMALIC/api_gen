@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { generate } from '../src/index.ts';
+import { generate, loadConfig } from '../src/index.ts';
 import { FIXTURES, ROOT, generateFixture, tmpDir, typecheck } from './helpers.ts';
 
 const CLI = path.join(ROOT, 'src', 'cli.ts');
@@ -146,6 +146,24 @@ test('login page, row actions, separate edit form and UI options (French, theme,
     assert.match(read('components/api-gen/theme.css'), /--primary: #16a34a;/);
     assert.match(read('pages/LayoutWithSidebar.tsx'), /import "@\/components\/api-gen\/theme\.css";/);
     assert.ok(!exists('pages/teams/TeamsList.tsx'), 'hidden resources get no pages');
+    typecheck(dir);
+});
+
+test('the YAML design shapes the generated pages', async () => {
+    const config = await loadConfig(path.join(FIXTURES, 'wrapped.design.yaml'));
+    const { dir, read, exists, result } = await generateFixture('wrapped.yaml', { ui: config.ui });
+    assert.deepEqual(result.warnings.filter(warning => warning.startsWith('ui.')), []);
+    const list = read('pages/users/UsersList.tsx');
+    assert.match(list, /key: "name"[^]*key: "nickname", label: "Surnom"[^]*key: "active"/);
+    assert.doesNotMatch(list, /key: "id"/, 'columns not listed are left out');
+    assert.match(list, /"Comptes des personnes qui utilisent l'application\."/);
+    assert.match(list, /"Réinitialiser le mot de passe"/);
+    const form = read('pages/users/UserForm.tsx');
+    assert.match(form, /<Textarea/, 'widget: textarea');
+    assert.match(form, /Affiché dans l'application/);
+    assert.match(read('pages/LoginForm.tsx'), /Adresse e-mail[^]*placeholder=\{"vous@exemple\.com"\}/);
+    assert.match(read('pages/LayoutWithSidebar.tsx'), /href: "\/roles"[^]*href: "\/users"/, 'sidebar follows ui.nav');
+    assert.ok(!exists('pages/teams/TeamsList.tsx'));
     typecheck(dir);
 });
 

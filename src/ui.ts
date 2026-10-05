@@ -1,6 +1,6 @@
 // User-facing options for the generated back-office: wording, language, theme and per-resource tweaks
 import { kebabCase } from './helpers.ts';
-import type { Model } from './model.ts';
+import type { Field, LoginInfo, Model } from './model.ts';
 
 /** Every string the generated UI shows. {placeholders} are filled in when generating. */
 export interface Strings {
@@ -203,13 +203,46 @@ export interface ThemeOptions {
     font?: string;
 }
 
+/** Input used for a text field in forms */
+export type Widget = 'text' | 'textarea' | 'password' | 'email' | 'url' | 'date' | 'datetime';
+export const WIDGETS: Widget[] = ['text', 'textarea', 'password', 'email', 'url', 'date', 'datetime'];
+
+export interface FieldOptions {
+    /** Column and form label */
+    label?: string;
+    /** Hide everywhere (true), or only in the "table" or the "form" */
+    hidden?: boolean | 'table' | 'form';
+    /** Position in forms (lower first) */
+    order?: number;
+    /** Help text under the input */
+    help?: string;
+    placeholder?: string;
+    /** Input for text fields, e.g. "textarea" for long text */
+    widget?: Widget;
+}
+
+export interface ActionOptions {
+    /** Button label */
+    label?: string;
+    /** Leave the button out (the API function and hook are still generated) */
+    hidden?: boolean;
+}
+
 export interface ResourceOptions {
     /** Plural label, e.g. "Utilisateurs" */
     label?: string;
     /** Singular label, e.g. "Utilisateur" */
     singularLabel?: string;
+    /** Text under the title of the list page */
+    description?: string;
     /** Leave this resource out of the dashboard (API functions and hooks are still generated) */
     hidden?: boolean;
+    /** Table columns, in order. Others are left out. */
+    columns?: string[];
+    /** Per-field options, by property name */
+    fields?: Record<string, FieldOptions>;
+    /** Per-row-action options, by operationId (or generated function name) */
+    actions?: Record<string, ActionOptions>;
 }
 
 export interface UiOptions {
@@ -226,7 +259,9 @@ export interface UiOptions {
     theme?: ThemeOptions;
     /** Show a light/dark switch in the sidebar (default true) */
     darkModeToggle?: boolean;
-    /** Per-resource labels and visibility, keyed by resource name as in the URL ("users", "product-categories") */
+    /** Sidebar order, by resource name. Resources not listed follow in their spec order. */
+    nav?: string[];
+    /** Per-resource labels, columns, fields and actions, keyed by resource name as in the URL ("users", "product-categories") */
     resources?: Record<string, ResourceOptions>;
 }
 
@@ -237,6 +272,7 @@ export interface Ui {
     darkModeToggle: boolean;
     theme: ThemeOptions;
     resources: Record<string, ResourceOptions>;
+    nav: string[];
 }
 
 export function resolveUi(options: UiOptions | undefined, documentTitle: string | undefined): Ui {
@@ -253,6 +289,7 @@ export function resolveUi(options: UiOptions | undefined, documentTitle: string 
         darkModeToggle: options?.darkModeToggle ?? true,
         theme,
         resources: options?.resources ?? {},
+        nav: options?.nav ?? [],
     };
 }
 
@@ -261,22 +298,118 @@ export function fill(text: string, values: Record<string, string | number>): str
     return text.replace(/\{(\w+)\}/g, (match, key: string) => (key in values ? String(values[key]) : match));
 }
 
-/** Apply per-resource label overrides and drop hidden resources from the dashboard */
-export function applyResourceOptions(models: Model[], ui: Ui): Model[] {
-    return models.map(model => {
-        const options = ui.resources[model.key] ?? ui.resources[model.slug] ?? ui.resources[model.name];
+const resourceKeys = (model: Model) => [model.key, model.slug, model.name];
+
+function resourceOptions(model: Model, ui: Ui): ResourceOptions | undefined {
+    return resourceKeys(model).map(key => ui.resources[key]).find(Boolean);
+}
+
+function applyFieldOptions(field: Field, options: FieldOptions): Field {
+    const hidden = options.hidden === undefined ? field.hidden : { table: options.hidden === true || options.hidden === 'table', form: options.hidden === true || options.hidden === 'form' };
+    return {
+        ...field,
+        label: options.label ?? field.label,
+        hidden,
+        order: options.order ?? field.order,
+        description: options.help ?? field.description,
+        placeholder: options.placeholder ?? field.placeholder,
+        widget: options.widget ?? field.widget,
+    };
+}
+
+const byOrder = (a: Field, b: Field) => a.order - b.order;
+
+/**
+ * Apply the design options (labels, columns, fields, actions, sidebar order) to the models.
+ * Names that match nothing are reported as warnings, so typos in the design file don't go unnoticed.
+ */
+export function applyResourceOptions(
+    models: Model[],
+    ui: Ui,
+    login: LoginInfo | null = null
+): { models: Model[]; login: LoginInfo | null; warnings: string[] } {
+    const warnings: string[] = [];
+    const known = models.flatMap(resourceKeys);
+    for (const key of Object.keys(ui.resources)) {
+        if (!known.includes(key)) warnings.push(`ui.resources.${key}: no resource with that name. Resources: ${models.map(m => m.key).join(', ')}`);
+    }
+    for (const key of ui.nav) {
+        if (!known.includes(key)) warnings.push(`ui.nav: no resource named "${key}"`);
+    }
+
+    const updated = models.map(model => {
+        const options = resourceOptions(model, ui);
         if (!options) return model;
-        return {
+        const where = `ui.resources.${model.key}`;
+        const next: Model = {
             ...model,
             pluralLabel: options.label ?? model.pluralLabel,
             singularLabel: options.singularLabel ?? model.singularLabel,
+            description: options.description ?? model.description,
         };
+
+        for (const [name, fieldOptions] of Object.entries(options.fields ?? {})) {
+            if (fieldOptions.widget && !WIDGETS.includes(fieldOptions.widget)) {
+                warnings.push(`${where}.fields.${name}.widget: "${fieldOptions.widget}" is not one of ${WIDGETS.join(', ')}`);
+            }
+            const loginFields = login?.model.key === model.key ? login.fields : [];
+            const lists = [next.formFields, next.editFields, next.columns, loginFields, ...next.actions.map(action => action.fields ?? [])];
+            if (!lists.some(list => list.some(field => field.name === name))) {
+                const names = [...new Set(lists.flat().map(field => field.name))];
+                warnings.push(`${where}.fields.${name}: no field with that name. Fields: ${names.join(', ')}`);
+            }
+        }
+        const apply = (fields: Field[]) =>
+            fields.map(field => (options.fields?.[field.name] ? applyFieldOptions(field, options.fields[field.name]) : field)).sort(byOrder);
+        next.formFields = apply(next.formFields);
+        next.editFields = apply(next.editFields);
+        next.columns = apply(next.columns);
+
+        if (options.columns) {
+            for (const name of options.columns) {
+                if (!next.columns.some(field => field.name === name)) {
+                    warnings.push(`${where}.columns: no column "${name}". Columns: ${next.columns.map(field => field.name).join(', ')}`);
+                }
+            }
+            next.tableColumns = options.columns;
+        }
+
+        const actionOptions = options.actions ?? {};
+        for (const key of Object.keys(actionOptions)) {
+            if (!next.actions.some(action => [action.op.operationId, action.op.functionName, action.Name].includes(key))) {
+                warnings.push(`${where}.actions.${key}: no row action with that name. Actions: ${next.actions.map(action => action.op.operationId ?? action.op.functionName).join(', ') || 'none'}`);
+            }
+        }
+        next.actions = next.actions
+            .map(action => {
+                const found = [action.op.operationId, action.op.functionName, action.Name].map(key => key && actionOptions[key]).find(Boolean);
+                return found ? { ...action, label: found.label ?? action.label, hidden: found.hidden ?? false } : action;
+            })
+            .map(action => ({ ...action, fields: action.fields && options.fields ? apply(action.fields) : action.fields }));
+        return next;
     });
+
+    // Sidebar order: listed resources first, in that order
+    const position = (model: Model) => {
+        const index = ui.nav.findIndex(key => resourceKeys(model).includes(key));
+        return index === -1 ? ui.nav.length : index;
+    };
+    const ordered = updated.map((model, index) => ({ model, index })).sort((a, b) => position(a.model) - position(b.model) || a.index - b.index);
+    const orderedModels = ordered.map(({ model }) => model);
+
+    // The login form takes the field options of its resource (e.g. ui.resources.auth.fields.email)
+    let designedLogin = login;
+    if (login) {
+        const loginModel = orderedModels.find(model => model.key === login.model.key) ?? login.model;
+        const fieldOptions = resourceOptions(login.model, ui)?.fields ?? {};
+        const fields = login.fields.map(field => (fieldOptions[field.name] ? applyFieldOptions(field, fieldOptions[field.name]) : field)).sort(byOrder);
+        designedLogin = { ...login, model: loginModel, fields };
+    }
+    return { models: orderedModels, login: designedLogin, warnings };
 }
 
 export function isHidden(model: Model, ui: Ui): boolean {
-    const options = ui.resources[model.key] ?? ui.resources[model.slug] ?? ui.resources[model.name];
-    return !!options?.hidden;
+    return !!resourceOptions(model, ui)?.hidden;
 }
 
 // Readable text on a solid color: black or white depending on the color's luminance (hex colors only)

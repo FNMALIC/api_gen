@@ -1,4 +1,5 @@
-export { generate, watch, loadConfig, TARGETS } from './generate.ts';
+export { generate, watch, TARGETS } from './generate.ts';
+export { loadConfig, validateConfig, createDesignFile } from './config.ts';
 export type { GenerateOptions, GenerateResult } from './generate.ts';
 export { loadSpec, buildModels } from './spec.ts';
 export type * from './model.ts';

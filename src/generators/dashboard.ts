@@ -87,6 +87,10 @@ const isScalar = (field: Field) => !['object', 'array', 'unknown'].includes(fiel
 const isDisplayable = (field: Field) => isScalar(field) || (field.type === 'array' && field.items && !field.items.isObject);
 
 function tableColumns(model: Model): Field[] {
+    // Columns picked in the design file are shown as listed
+    if (model.tableColumns) {
+        return model.tableColumns.map(name => model.columns.find(field => field.name === name)).filter((field): field is Field => !!field);
+    }
     return model.columns.filter(field => isDisplayable(field) && !field.writeOnly && !(field.hidden && field.hidden.table));
 }
 
@@ -143,7 +147,7 @@ function generateListPage(model: Model, router: Router, ui: Ui, formImport: stri
     const { create, retrieve, update, delete: remove } = model.crud;
     const hooks = hookNames(model);
     const canEdit = !!(retrieve && update);
-    const rowActions = model.actions;
+    const rowActions = model.actions.filter(action => !action.hidden);
     const hasActionsColumn = canEdit || !!remove || rowActions.length > 0;
     const usesDialogs = !!remove || rowActions.length > 0;
     const formActions = rowActions.filter(action => action.fields);
@@ -337,7 +341,7 @@ ${hasSort ? `
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <div className="space-y-1.5">
                     <CardTitle>{${text(model.pluralLabel)}}</CardTitle>
-                    <CardDescription>{${text(fill(s.manage, labels))}}</CardDescription>
+                    <CardDescription>{${text(model.description ?? fill(s.manage, labels))}}</CardDescription>
                 </div>${create ? `
                 ${router.link(`"/${slug}/create"`, `{${text(s.addNew)}}`, 'buttonVariants()')}` : ''}
             </CardHeader>
@@ -876,7 +880,7 @@ export function generateCRUDDashboard(
         const forms: FormSpec[] = [
             ...(pages.create ? [{ component: `${model.Singular}CreateForm`, fields: model.formFields }] : []),
             ...(pages.edit ? [{ component: `${model.Singular}EditForm`, fields: model.editFields }] : []),
-            ...model.actions.filter(action => action.fields).map(action => ({ component: `${action.Name}Form`, fields: action.fields as Field[] })),
+            ...model.actions.filter(action => action.fields && !action.hidden).map(action => ({ component: `${action.Name}Form`, fields: action.fields as Field[] })),
         ];
 
         files[paths.list] = render('listPage', generateListPage(model, router, ui, paths.listFormImport), model);

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=../../config.schema.json
+# Design used by the end-to-end test for test/fixtures/wrapped.yaml
+input: ./wrapped.yaml
+ui:
+  title: Mon back-office
+  locale: fr
+  primaryColor: "#16a34a"
+  nav: [roles, users]
+  resources:
+    auth:
+      fields:
+        email: { label: Adresse e-mail, placeholder: vous@exemple.com }
+        password: { label: Mot de passe }
+    users:
+      label: Utilisateurs
+      singularLabel: Utilisateur
+      description: Comptes des personnes qui utilisent l'application.
+      columns: [name, nickname, active]
+      fields:
+        nickname: { label: Surnom, help: Affiché dans l'application }
+        reason: { label: Motif, widget: textarea }
+      actions:
+        setUserStatus: { label: Changer le statut }
+        resetUserPassword: { label: Réinitialiser le mot de passe }
+    teams:
+      hidden: true

@@ -168,12 +168,14 @@ function control(field: Field, path: string, ui: Ui): string {
         }
         case 'number':
             return item(labelled(`<Input
-                    type="number"
+                    type="number"${field.placeholder ? `
+                    placeholder={${JSON.stringify(field.placeholder)}}` : ''}
                     {...field}
                     value={field.value ?? ""}
                     onChange={(e) => field.onChange(e.target.value === "" ? undefined : e.target.valueAsNumber)}
                 />`));
         case 'datetime':
+            if (field.widget && field.widget !== 'datetime') return textControl(field, item, labelled);
             return item(labelled('<DateTimeInput name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} />'));
         case 'file':
             return item(labelled('<FileInput name={field.name} onChange={field.onChange} onBlur={field.onBlur} />'));
@@ -195,13 +197,25 @@ function control(field: Field, path: string, ui: Ui): string {
 </fieldset>`;
         case 'json':
             return item(labelled('<JsonInput value={field.value} onChange={field.onChange} onBlur={field.onBlur} />'));
-        default: {
-            const inputTypes: Record<string, string> = { email: 'email', password: 'password', date: 'date', uri: 'url' };
-            const inputType = isPassword(field) ? 'password' : inputTypes[field.format ?? ''] || 'text';
-            const autoComplete = isPassword(field) ? ' autoComplete="current-password"' : field.format === 'email' ? ' autoComplete="email"' : '';
-            return item(labelled(`<Input type="${inputType}"${autoComplete} {...field} value={field.value ?? ""} />`));
-        }
+        default:
+            if (field.widget === 'datetime') {
+                return item(labelled('<DateTimeInput name={field.name} value={field.value} onChange={field.onChange} onBlur={field.onBlur} />'));
+            }
+            return textControl(field, item, labelled);
     }
+}
+
+// Text input, textarea or a typed input (password, email, ...), from the widget option or the schema format
+function textControl(field: Field, item: (inner: string) => string, labelled: (input: string) => string): string {
+    const placeholder = field.placeholder ? ` placeholder={${JSON.stringify(field.placeholder)}}` : '';
+    if (field.widget === 'textarea') {
+        return item(labelled(`<Textarea rows={4}${placeholder} {...field} value={field.value ?? ""} />`));
+    }
+    const widgetTypes: Record<string, string> = { text: 'text', password: 'password', email: 'email', url: 'url', date: 'date' };
+    const formatTypes: Record<string, string> = { email: 'email', password: 'password', date: 'date', uri: 'url' };
+    const inputType = (field.widget && widgetTypes[field.widget]) || (isPassword(field) ? 'password' : formatTypes[field.format ?? ''] || 'text');
+    const autoComplete = inputType === 'password' ? ' autoComplete="current-password"' : inputType === 'email' ? ' autoComplete="email"' : '';
+    return item(labelled(`<Input type="${inputType}"${autoComplete}${placeholder} {...field} value={field.value ?? ""} />`));
 }
 
 // Optional nested objects with required children validate with isBlank
@@ -223,6 +237,20 @@ function kindsIn(fields: Field[] | undefined, kinds: Set<FieldKind> = new Set())
     return kinds;
 }
 
+// Which of Input, Textarea and DateTimeInput the text, number and date fields render with
+function inputsIn(fields: Field[] | undefined, inputs: Set<string>): Set<string> {
+    for (const field of editable(fields)) {
+        const kind = fieldKind(field);
+        if (kind === 'object') inputsIn(field.properties, inputs);
+        else if (kind === 'number') inputs.add('Input');
+        else if (kind === 'string' || kind === 'datetime') {
+            const widget = field.widget ?? (kind === 'datetime' ? 'datetime' : 'text');
+            inputs.add(widget === 'textarea' ? 'Textarea' : widget === 'datetime' ? 'DateTimeInput' : 'Input');
+        }
+    }
+    return inputs;
+}
+
 function hasDescription(fields: Field[] | undefined): boolean {
     return editable(fields).some(field => (fieldKind(field) === 'object' ? hasDescription(field.properties) : !!field.description));
 }
@@ -241,10 +269,12 @@ export function generateFormFile(forms: FormSpec[], router: Router, ui: Ui): str
     const kinds = new Set<FieldKind>();
     forms.forEach(form => kindsIn(form.fields, kinds));
     const anyIsBlank = forms.some(form => needsIsBlank(form.fields));
+    const inputs = new Set<string>();
+    forms.forEach(form => inputsIn(form.fields, inputs));
     const anyDescription = forms.some(form => hasDescription(form.fields));
 
     const helperImports = [
-        kinds.has('datetime') && 'DateTimeInput',
+        inputs.has('DateTimeInput') && 'DateTimeInput',
         kinds.has('file') && 'FileInput',
         kinds.has('enumList') && 'CheckboxGroup',
         kinds.has('list') && 'ListInput',
@@ -291,9 +321,10 @@ export function ${component}({ defaultValues, onSubmit, isSubmitting, submitLabe
     return `${router.directive}${HEADER}import { useForm, type DefaultValues } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";${kinds.has('string') || kinds.has('number') ? `
+import { Button } from "@/components/ui/button";${inputs.has('Input') ? `
 import { Input } from "@/components/ui/input";` : ''}${kinds.has('boolean') ? `
-import { Checkbox } from "@/components/ui/checkbox";` : ''}
+import { Checkbox } from "@/components/ui/checkbox";` : ''}${inputs.has('Textarea') ? `
+import { Textarea } from "@/components/ui/textarea";` : ''}
 import { ${formImports.join(', ')} } from "${FORM_IMPORT}";
 import { ${helperImports.join(', ')} } from "${FIELDS_IMPORT}";
 

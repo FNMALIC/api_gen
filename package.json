@@ -19,6 +19,7 @@
   "files": [
     "bin",
     "dist",
+    "config.schema.json",
     "README.md",
     "CHANGELOG.md"
   ],
@@ -47,9 +48,11 @@
   "license": "MIT",
   "dependencies": {
     "@apidevtools/swagger-parser": "^13.1.0",
+    "ajv": "^8.20.0",
     "commander": "^15.0.0",
     "prettier": "^3.9.9",
-    "swagger2openapi": "^7.0.8"
+    "swagger2openapi": "^7.0.8",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@hookform/resolvers": "^5.9.1",

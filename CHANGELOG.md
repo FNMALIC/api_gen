@@ -24,6 +24,14 @@ Improvements from a real back-office build, and options to customize the dashboa
 - Dashboard options (`ui` in the config file, plus flags): `title`, `locale` (`en`, `fr`), `labels` to override any
   string, `pageSize`, `primaryColor`, `theme` (any shadcn color token for light and dark, `radius`, `font`),
   `darkModeToggle`, and per-resource `label`, `singularLabel` and `hidden`.
+- Design file: `api-gen.config.yaml` (YAML config) with per-resource `description`, `columns` (which and in what
+  order), `fields` (`label`, `hidden`, `order`, `help`, `placeholder`, `widget` such as `textarea`) and `actions`
+  (`label`, `hidden`), plus `ui.nav` for the sidebar order. The login form takes the field options of its resource.
+- `generate-api init` writes a starting design file from the OpenAPI document, listing every resource, column,
+  field and action with its label.
+- The config file is validated against `config.schema.json` (shipped with the package, also usable by editors for
+  completion): typos stop generation with a "did you mean" hint, and names that match nothing in the API are
+  reported as warnings.
 - Light/dark switch in the sidebar, the dashboard title in the sidebar, and `/` redirecting to the first resource.
 - The CLI prints the npm packages to install along with the shadcn components.
 

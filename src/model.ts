@@ -157,6 +157,9 @@ export interface Field {
     nullable: boolean;
     required: boolean;
     description?: string;
+    placeholder?: string;
+    /** Input for text fields, from the design file: text, textarea, password, email, url, date, datetime */
+    widget?: string;
     items?: { type: string; format?: string; enum?: unknown[]; isObject: boolean };
     isMap?: boolean;
     properties?: Field[];
@@ -193,6 +196,10 @@ export interface Model {
     /** Fields of the edit form (update request body, which may differ from the create body) */
     editFields: Field[];
     columns: Field[];
+    /** Table columns chosen in the design file, in order (default: every displayable column) */
+    tableColumns?: string[];
+    /** Text under the list page title, from the design file */
+    description?: string;
     /** Item operations outside create/read/update/delete, e.g. POST /users/{id}/status */
     actions: Action[];
     listCapabilities: ListCapabilities | null;
@@ -206,6 +213,8 @@ export interface Action {
     Name: string;
     /** Body fields, or null when the operation takes no body */
     fields: Field[] | null;
+    /** Hidden in the design file: no button */
+    hidden?: boolean;
 }
 
 /** A sign-in endpoint: POST .../login with a password field, returning a token */
